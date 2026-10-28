@@ -1,0 +1,18 @@
+{
+  "epoch": "轮次",
+  "checkpoint": "检查点",
+  "LoRA": "LoRA",
+  "LoKR": "LoKR",
+  "Fine-tune": "微调",
+  "learning rate": "学习率",
+  "caption": "标注",
+  "trigger word": "触发词",
+  "sample": "样本",
+  "preset": "预设",
+  "dataset": "数据集",
+  "loss": "损失",
+  "gradient": "梯度",
+  "block swap": "块交换",
+  "resume": "继续训练",
+  "queue": "队列"
+}
