@@ -26,7 +26,10 @@ def _preset(rank, lr, epochs=30, mp="1.0", slider=False):
 
 ANIMA = FamilyDescription(
     key="anima",
+    start_lr_bands=(("lora", 7e-6, 3e-4), ("finetune", 3e-7, 3e-5), ("slider", 7e-5, 6e-4)),
     masked_training=True,
+    batch_training=True,              # Batch size (Other Options): training_loss_batch, exact per picture
+    batch_gb=(0.25, 0.65),          # GB each extra picture takes: fixed, per MP (batch 1 vs 3)
     arch_id="anima",
     display_name="Anima",
     gui_label="Anima",

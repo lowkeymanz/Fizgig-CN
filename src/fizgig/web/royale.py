@@ -9,6 +9,7 @@ import shutil
 import threading
 
 from fizgig.lora_royale.scan import run_name_for_folder, scan_checkpoints
+from fizgig.utils.image import flatten
 
 _lock = threading.Lock()
 _like = {"gen": 0, "scores": {}, "ref": "", "best": None}          # the last scoring, for its render generation
@@ -67,24 +68,29 @@ def _images(rendered):
     out = []
     for label, _path, png in rendered:
         with Image.open(png) as im:
-            out.append((label, im.convert("RGB")))
+            out.append((label, flatten(im)))
     return out
 
 
-def score(gen, rendered, ref):
-    """Each render's face against the subject photo (Image Prep's look match - with Auto, ArcFace for a person and
-    DINOv2 for a furry / anime face - on the CPU): {label: cosine or None (no face)}, and the best."""
+def score(gen, rendered, refs):
+    """Each render's face against up to 3 photos of the subject, the mean of its similarities (Image Prep's look
+    match - with Auto, ArcFace for a person and DINOv2 for a furry / anime face - on the CPU, as the Samples gallery
+    scores against its 3 baselines): {label: score or None (no face)}, and the best."""
     from fizgig.lora_royale import likeness
     if not likeness.available():
         raise ValueError("Likeness scoring needs the face tools - run install_fizgig.py to enable it.")
-    if not ref or not os.path.isfile(ref):
-        raise ValueError("Pick a subject image to score likeness against.")
-    scored = likeness.score_renders(ref, _images(rendered))
+    refs = [str(r).strip() for r in ([refs] if isinstance(refs, str) else refs or []) if str(r).strip()][:3]
+    if not refs:
+        raise ValueError("Choose up to 3 photos of your subject to score likeness against.")
+    gone = [os.path.basename(r) for r in refs if not os.path.isfile(r)]
+    if gone:
+        raise ValueError(f"{', '.join(gone)} isn't there any more - choose the photos again.")
+    scored = likeness.score_renders(refs, _images(rendered))
     scores = {str(label): (None if sc != sc else float(sc)) for label, sc in scored}
     valid = [(lbl, sc) for lbl, sc in scores.items() if sc is not None]
     best = max(valid, key=lambda t: t[1])[0] if valid else None
     with _lock:
-        _like.update(gen=gen, scores=scores, ref=ref, best=best)
+        _like.update(gen=gen, scores=scores, ref=refs[0], best=best)     # the clip shows the first photo
     return {"scores": scores, "best": best, "no_face": len(scores) - len(valid), "embedder": likeness.last_embedder_label}
 
 
@@ -106,7 +112,7 @@ def export(rendered, out_dir, run, fmt="MP4", speed="Normal", pingpong=True, sho
         if like["gen"] != gen or not like["scores"]:
             raise ValueError("Score likeness first - the clip shows each epoch's score beside your subject image.")
         with Image.open(like["ref"]) as ri:
-            ref_img = ri.convert("RGB")
+            ref_img = flatten(ri)
         scores = {lbl: (float("nan") if like["scores"].get(str(lbl)) is None else like["scores"][str(lbl)])
                   for lbl, _ in images}
         frames = rexport.build_likeness_frames(ref_img, images, scores, speed=speed, pingpong=pingpong, brand=brand,
@@ -180,7 +186,7 @@ def save_travel(frames, out_dir, run, prefix, fmt="MP4", speed="Normal", pingpon
     imgs = []
     for png, _label in frames:
         with Image.open(png) as im:
-            imgs.append(im.convert("RGB"))
+            imgs.append(flatten(im))
     if not imgs:
         raise ValueError("Render the frames first.")
     if deflicker and deflicker != "None":

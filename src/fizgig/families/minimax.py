@@ -108,8 +108,9 @@ OPTIONS = (
                  mode="lora", setting="MINIMAX_TREAD", show_if_media="clip", section="after"),
     FamilyOption("H3_CLIP_STILL", "Also train each clip's sharpest face frame as a photo", kind="check",
                  tokens="clip_still_as_photo=1 aux:clip_still=1", default="1",
-                 hint="Each clip's sharpest face frame trains as a photo with the clip's caption. Picked at caching; "
-                      "clips cached with this off use frame 0 until re-cached.",
+                 hint="Each clip's sharpest face frame trains as a photo with the clip's caption; a clip with no face "
+                      "uses its first frame. For clips without people, untick it (the Style preset does). Picked at "
+                      "caching; clips cached with this off use frame 0 until re-cached.",
                  setting="MINIMAX_CLIP_STILL", show_if_media="clip", section="after"),
     FamilyOption("H3_ADAPTER_RAMP", "Adapter-relative LR", kind="choice", choices=(
         ("Off", ""), ("0.003 (slow build)", "adapter_ramp=0.003"), ("0.005 (recommended)", "adapter_ramp=0.005"),
@@ -136,7 +137,8 @@ OPTIONS = (
                  tokens="distill=1 aux:distill=1 --dit=pref:minimax_ref_dit",
                  hint="Experiment. Teaches the LoRA to reproduce identity the way H3 does from a reference photo. "
                       "Needs the ref2va model in Preferences.", summary="distill", setting="MINIMAX_DISTILL", section="other",
-                 isolation_off=True),     # the side-by-sides' block would hand two-person pictures in as references
+                 isolation_off=True,      # the side-by-sides' block would hand two-person pictures in as references
+                 batch_off=True),         # its teacher step is one picture's own reference sequence
     FamilyOption("H3_DISTILL_WEIGHT", "   teacher ", kind="entry", inline=True, always_shown=True, width=5,
                  suggestions=("0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"), tokens="distill_weight={}", default="0.8",
                  requires="H3_DISTILL", summary="teacher {}", setting="MINIMAX_DISTILL_WEIGHT", section="other"),
@@ -174,6 +176,7 @@ OPTIONS = (
 
 MINIMAX = FamilyDescription(
     key="minimax",
+    start_lr_bands=(("slider", 7e-5, 6e-4),),
     arch_id="minimaxh3",
     display_name="MiniMax H3",
     gui_label="MiniMax H3",
@@ -309,12 +312,19 @@ MINIMAX = FamilyDescription(
     multi_concept=True,
     # the old H3 recipe on the box's click: a stronger caption dropout (each subject must answer to its own trigger)
     multi_concept_defaults=(("H3_CAPTION_DROPOUT", "0.10 (strong)"),),
+    caption_dropout=False,                   # its own Caption dropout option (the cached uncond embed)
+    resolution_stages=False,                 # clips train at their own size: not measured with stages
+    detail_crops=False,                      # clips: a crop of a frame isn't a clip
     multi_concept_hint="See the MiniMax section of the README.",
     int8_attention=True,              # workbench renders: comfy-kitchen's INT8 attention
     activation_cache=True,            # Turbo Preview: step-1 replay, identical to a full render
     adaptive_lr=False,
     slider_training=True,             # prompt pairs, photo pairs and clip pairs (driver: _slider_loss / predict)
     loss_watch=False,
+    batch_training=True,              # Batch size (Other Options): pictures packed (forward_packed); clips one a step
+    own_plan=True,                    # the old trainer's planner (driver.plan_run): its own figures, not train_memory
+    batch_gb=(0.2, 0.8),              # GB each extra picture takes: fixed, per MP (batch 2 vs 3: batch 1 runs without checkpointing)
+    masked_training=True,             # photos only: the dataset gives a mask to a still, never to a clip or a voice
     network_hint="LoRA recommended for MiniMax",
     ema_hint="A smoothed average of the weights, leading to better and more reliable previews.",
     samples_turbo_pace=True,

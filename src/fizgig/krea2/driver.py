@@ -70,17 +70,23 @@ class Krea2Driver(FamilyDriver):
 
     def stream_dit(self, path):
         """For a short-RAM load (families/quant.py _stream_load): the model on meta, the open file and the dtype
-        load_dit reads it at. None for a pre-quantised fp8 file, which load_dit keeps fp8."""
+        load_dit reads it at. None for a pre-quantised fp8 file, which load_dit keeps fp8. An int8 / older fp8
+        ComfyUI build is decoded a tensor at a time as it is read."""
         from fizgig.krea2.model import SingleStreamDiT
-        from fizgig.krea2.safetensors_utils import MemoryEfficientSafeOpen
-        from fizgig.krea2.utils import is_prequantized_fp8, single_mmdit_large_wide
+        from fizgig.krea2.utils import ComfyDecodeReader, dit_layout, single_mmdit_large_wide
         from fizgig.utils.safetensors import warm_file_cache
-        if is_prequantized_fp8(path):
+        if dit_layout(path) == "fp8":
             return None
         warm_file_cache(path)
         with torch.device("meta"):
             dit = SingleStreamDiT(single_mmdit_large_wide, attn_mode="torch", split_attn=False)
-        return dit, MemoryEfficientSafeOpen(path), DTYPE
+        return dit, ComfyDecodeReader(path, dit.state_dict().keys()), DTYPE
+
+    def dit_gb(self, path):
+        """An int8 / older fp8 ComfyUI build is decoded to bf16 at load: about twice its file."""
+        from fizgig.krea2.utils import dit_layout
+        size = super().dit_gb(path)
+        return size * 2 if dit_layout(path) == "decode" else size
 
     def max_blocks_to_swap(self, dit=None):
         return (len(dit.blocks) if dit is not None else self.description.n_blocks) - 2
@@ -221,6 +227,20 @@ class Krea2Driver(FamilyDriver):
         t = self._sample_t(n_tokens, generator, min_t, max_t)
         loss = self.loss_at(dit, latents, noise, t, cond, diff_ref=diff_ref, diff_weight=diff_weight,
                             loss_mask=loss_mask, prior=prior)
+        return loss, {"t": float(t.mean())}
+
+    def training_loss_batch(self, dit, latents, cond, generator, *, min_t=0.0, max_t=1.0, loss_mask=None):
+        """Batch Size above 1: each picture's noise and t drawn as training_loss draws them, picture by picture, then
+        one loss_at over the batch. Captions stack as encoded (512 tokens + validity mask each); _text gathers each
+        one's valid tokens and pads to the batch's longest with a mask, as the shared attention expects."""
+        patch = dit.config.patch
+        n_tokens = (latents.shape[-2] // patch) * (latents.shape[-1] // patch)
+        noises, ts = [], []
+        for i in range(latents.shape[0]):
+            noises.append(torch.randn(latents[i:i + 1].shape, generator=generator))
+            ts.append(self._sample_t(n_tokens, generator, min_t, max_t))
+        t = torch.cat(ts)
+        loss = self.loss_at(dit, latents, torch.cat(noises), t, cond, loss_mask=loss_mask)
         return loss, {"t": float(t.mean())}
 
     def noise_latents(self, latents, generator, *, min_t=0.0, max_t=1.0):

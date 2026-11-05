@@ -28,7 +28,10 @@ _STYLE_COMP = tuple(f"double_{i}" for i in range(8)) + ("single_0", "single_1")
 
 KLEIN = FamilyDescription(
     key="klein",
+    start_lr_bands=(("lora", 3e-5, 1.2e-3),),
     masked_training=True,
+    batch_training=True,              # Batch size (Other Options): training_loss_batch, exact per picture
+    batch_gb=(0.8, 1.1),            # GB each extra picture takes: fixed, per MP (batch 1 vs 3)
     arch_id="klein9bdrv",
     display_name="Klein 9B",
     gui_label="Flux 2 Klein Base 9B",
@@ -54,7 +57,9 @@ KLEIN = FamilyDescription(
                   hint="Flux 2 AutoEncoder — use ae.safetensors from FLUX.2-dev root (NOT the vae/ subfolder "
                        "Diffusers file)",
                   download_note="~320MB  ·  get ae.safetensors from FLUX.2-dev root  ·  NOT "
-                                "vae/diffusion_pytorch_model.safetensors (Diffusers format, incompatible)"),
+                                "vae/diffusion_pytorch_model.safetensors (Diffusers format, incompatible)",
+                  # saved under Flux 3's and Fibo's name for the same file: Z-Image's ae.safetensors is another VAE
+                  local_name="flux2-vae.safetensors"),
         ModelFile("text_encoder", "Text Encoder", True, "Comfy-Org/vae-text-encorder-for-flux-klein-9b",
                   "split_files/text_encoders/qwen_3_8b.safetensors", 15.0, role="text_encoder",
                   hint="Qwen3-8B text encoder (used by Klein 9B)",

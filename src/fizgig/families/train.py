@@ -46,6 +46,7 @@ from fizgig.training.metadata import (build_metadata, latest_sample_image, refre
                                       resolve_title, sample_for_epoch, thumbnail_data_uri)
 from fizgig.training.train_utils import LossRecorder, prune_state_dirs, validate_output_name  # noqa: E402
 from fizgig.training.step_log import StepLog, take_request  # noqa: E402
+from fizgig.utils.image import flatten
 from fizgig.utils.upright import open_upright
 
 logger = logging.getLogger(__name__)
@@ -467,14 +468,23 @@ def _reference_size(w, h, area):
     return max(64, round((area * r) ** 0.5 / 64) * 64), max(64, round((area / r) ** 0.5 / 64) * 64)
 
 
-def _load_references(paths, width, height):
+def _as_trained(im, rgba=False):
+    """A picture as training takes it: RGBA when it has transparency and the family's VAE takes alpha (description
+    rgba), else RGB with a see-through picture laid on white."""
+    from fizgig.utils.image import flatten
+    if rgba and (im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info):
+        return im.convert("RGBA")
+    return flatten(im)
+
+
+def _load_references(paths, width, height, rgba=False):
     """uint8 (H, W, 3) arrays of the preview's reference images and the preview's (width, height): the first (the
     photo the edit is made to) sets the preview's shape at its area; extra pictures (a multi-picture edit's photo_1,
     photo_2 ...) keep their own shape at that area, as they are sized in training."""
     import numpy as np
     from PIL import Image, ImageOps
     from fizgig.utils.upright import open_upright
-    imgs = [open_upright(p).convert("RGB") for p in paths]
+    imgs = [_as_trained(open_upright(p), rgba) for p in paths]       # as training takes them
     size = _reference_size(*imgs[0].size, width * height)
     return [np.array(ImageOps.fit(im, size if i == 0 else _reference_size(*im.size, width * height), Image.LANCZOS))
             for i, im in enumerate(imgs)], size
@@ -521,7 +531,7 @@ def _slider_strip(frames, multipliers):
     draw = ImageDraw.Draw(strip)
     for k, (im, label) in enumerate(zip(frames, labels)):
         x = k * (w + gap)
-        strip.paste(im, (x, band))
+        strip.paste(flatten(im), (x, band))
         draw.text((x + 8, pad - top), label, fill=(236, 236, 236), font=font)
     return strip
 
@@ -906,7 +916,7 @@ class _CheckpointPreviews:
 def _largest_bucket_mp(group):
     """Megapixels of the run's largest actual bucket (what sets activation memory), or None."""
     try:
-        return max(w * h / 1e6 for ds in group.datasets for (w, h) in ds.batch_manager.bucket_resos)
+        return max(k[-2] * k[-1] / 1e6 for ds in group.datasets for k in ds.batch_manager.bucket_resos)
     except Exception:
         return None
 
@@ -1053,7 +1063,8 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
                  ft_epochs_done=0, ft_fused_backward=False, reg_lr_multiplier=0.2, preview_checkpoint=None,
                  preview_checkpoint_cache="auto", preview_int8=False, family_options=None,
                  dop=False, dop_trigger=None, dop_class="", dop_weight=1.0, dop_every=1, dop_ft_samples=8,
-                 lr_boost=None, share_worker=None, masked_training=False, mask_floor=0.1, mask_prior=0.0):
+                 lr_boost=None, share_worker=None, masked_training=False, mask_floor=0.1, mask_prior=0.0,
+                 caption_dropout=0.0, stage_dataset_config=None, stage_until=0.3, stage_blend=0.1):
     desc = get_family(family)
     if desc is None or not desc.training_ready:
         raise RuntimeError(f"unknown or untrainable family {family!r}")
@@ -1198,6 +1209,40 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
         logger.info(f"[masks] outside the mask, the LoRA is kept to the model's own picture at x{mask_prior:g} "
                     "(one extra forward a step, without the LoRA)")
 
+    def _batch_loss(batch, latents):
+        """Batch Size above 1: the step's pictures in one forward per caption shape. Each picture's caption dropout
+        is drawn on its own; the loss is the pictures' mean, as their own steps would average."""
+        n = latents.shape[0]
+        if any(k.startswith("latents_control_") for k in batch):
+            raise RuntimeError("Batch size above 1 trains plain pictures: an edit's before-images need batch 1")
+        conds = []
+        for i in range(n):
+            one = {k: (v[i][None] if isinstance(v, list) and len(v) == n and torch.is_tensor(v[0]) else
+                       v[i:i + 1] if torch.is_tensor(v) and v.dim() and v.shape[0] == n else
+                       [v[i]] if isinstance(v, list) and len(v) == n else v) for k, v in batch.items()}
+            c = driver.batch_cond(one, device)
+            if uncond is not None and random.Random((global_step * 7919 + 17) * 31 + i).random() < caption_dropout:
+                c = {**c, **{k: v.to(device) for k, v in uncond.items()}}
+            conds.append(c)
+        groups, whole = [], driver.stack_conds(conds)
+        if whole is not None:
+            groups = [(list(range(n)), whole)]
+        else:
+            shapes = {}
+            for i, c in enumerate(conds):
+                shapes.setdefault(tuple((k, tuple(v.shape)) for k, v in c.items() if torch.is_tensor(v)), []).append(i)
+            groups = [(ix, driver.stack_conds([conds[i] for i in ix])) for ix in shapes.values()]
+        lm = _loss_mask(batch)
+        total, ts = 0.0, []
+        for ix, cond in groups:
+            sel = torch.tensor(ix, device=latents.device)
+            l, info = driver.training_loss_batch(dit, latents.index_select(0, sel), cond, gen, min_t=min_timestep,
+                                                 max_t=max_timestep,
+                                                 loss_mask=None if lm is None else lm.index_select(0, sel.to(lm.device)))
+            total = total + l * (len(ix) / n)
+            ts.append(float(info.get("t", 0.5)))
+        return total, {"t": sum(ts) / len(ts)}
+
     def _loss_mask(batch):
         """The step's per-cell loss weights (masked training), or None: a picture without a mask trains as normal."""
         m = batch.get("loss_mask") if masked_training else None
@@ -1212,19 +1257,65 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
             logger.info("[slider] previews use the pairs' caption: '%s'", shared)
     if slider:
         driver.slider_setup(group)           # e.g. H3: still previews unless the pairs are clips
-    for ds in group.datasets:
-        if getattr(ds, "batch_size", 1) != 1:
-            raise RuntimeError("Fizgig trains one image at a time: set batch_size = 1 in the dataset config. For a "
-                               "larger effective batch use --gradient_accumulation_steps (the same averaged "
-                               "gradient, at the memory of batch 1).")
+    bsz = max(int(getattr(ds, "batch_size", 1) or 1) for ds in group.datasets)
+    if bsz != 1 and not desc.batch_training:
+        raise RuntimeError("Fizgig trains one image at a time: set batch_size = 1 in the dataset config. For a "
+                           "larger effective batch use --gradient_accumulation_steps (the same averaged "
+                           "gradient, at the memory of batch 1).")
+    if bsz != 1:
+        # Batch Size above 1 (Other Options): what reads one picture a step stays at batch 1
+        blockers = [name for on, name in (
+            (slider, "a slider"), (finetune, "a fine-tune"), (bool(log_per_image_loss or per_image_lr or auto_recaption
+                                                                  or warmup_look_outliers), "the per-image loss watch"),
+            (bool(dop), "DOP"), (bool(mask_prior), "keeping the model's own picture outside the mask"),
+            (bool(stage_dataset_config), "Start at a smaller size"), (share_worker is not None, "a helper's share"),
+            (any(getattr(ds, "is_reg", False) for ds in group.datasets), "regularisation images")) if on]
+        if blockers:
+            raise RuntimeError(f"Batch size {bsz} can't run with {', '.join(blockers)}: set Batch size to 1, or turn "
+                               "those off.")
+        logger.info(f"[batch] {bsz} pictures a step, each from the same size bucket; a batch whose captions differ "
+                    "in shape runs each shape's pictures as their own group")
     loader = DataLoader(group, batch_size=1, shuffle=True, num_workers=0,
                         collate_fn=(lambda b: b[0]) if slider_prompts else _Collator(shared_epoch, group))
+    # Start at a smaller size: the first stage_until of the epochs draw from this dataset (its own cache folder),
+    # blending into the full size over stage_blend of the run
+    low_loader = None
+    if stage_dataset_config and not slider and not finetune and share_worker is None:
+        _lbp = BlueprintGenerator(ConfigSanitizer()).generate(load_user_config(stage_dataset_config),
+                                                              argparse.Namespace(), architecture=arch)
+        low_group = generate_dataset_group_by_blueprint(_lbp.dataset_group, training=True, num_timestep_buckets=None,
+                                                        shared_epoch=shared_epoch)
+        if low_group.num_train_items == 0:
+            logger.warning("[stages] the smaller size has no cache - this run trains at the full size throughout")
+        else:
+            low_loader = DataLoader(low_group, batch_size=1, shuffle=True, num_workers=0,
+                                    collate_fn=_Collator(shared_epoch, low_group))
+            logger.info(f"[stages] the first {float(stage_until) * 100:.0f}% of the epochs at the smaller size "
+                        f"({low_group.num_train_items} items), blending into the full size over "
+                        f"{float(stage_blend) * 100:.0f}% of the run")
+    low_iter = [None]
+
+    def _low_share(epoch):
+        """This epoch's share of steps at the smaller size: 1 before the blend, 0 after, a straight line between."""
+        if low_loader is None:
+            return 0.0
+        x = (epoch + 0.5) / max(1, max_train_epochs)
+        a, b = float(stage_until) - float(stage_blend) / 2, float(stage_until) + float(stage_blend) / 2
+        return 1.0 if x <= a else 0.0 if x >= b else (b - x) / (b - a)
+
+    def _low_batch():
+        try:
+            return next(low_iter[0])
+        except (StopIteration, TypeError):
+            low_iter[0] = iter(low_loader)
+            return next(low_iter[0])
     steps_per_epoch = len(loader)
     logger.info(f"{desc.display_name} training: {group.num_train_items} items, {max_train_epochs} epochs, "
                 f"{steps_per_epoch} steps/epoch")
     _launch = uuid.uuid4().hex[:12]      # this launch: a re-run of the same name is a new training share
     # what keeps this run on one GPU (the share's half would train without it), for the Helpers tab to say so
     _share_off = ("a fine-tune" if finetune else
+                  "Start at a smaller size" if low_loader is not None else
                   "Your subject and other people" if dop else
                   "Track how each image trains and the per-image options" if (
                       log_per_image_loss or per_image_lr or auto_recaption or warmup_look_outliers) else "")
@@ -1274,8 +1365,9 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
         if own is not None:
             precision, blocks_to_swap, why = own
         else:
-            precision, blocks_to_swap, why = quant.plan(desc, driver, precision, blocks_to_swap, megapixels=mp)
-            why += f" at {mp:.2f} MP"
+            precision, blocks_to_swap, why = quant.plan(desc, driver, precision, blocks_to_swap, megapixels=mp,
+                                                         pictures=bsz)
+            why += f" at {mp:.2f} MP" + (f" x {bsz} pictures a step" if bsz > 1 else "")
             if share_worker is not None:
                 # a helper's share trains at the lead's precision (the same base numbers): say so plainly, before the
                 # model loads, when this card can't hold it even with the most blocks swapped (the lead trains on)
@@ -1294,11 +1386,12 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
     cb = str(compile_blocks or "off").lower()
     if desc.compiles and cb != "off":
         try:
-            mp_max = max(w * h / 1e6 for ds in group.datasets for (w, h) in ds.batch_manager.bucket_resos)
+            mp_max = max(k[-2] * k[-1] / 1e6 for ds in group.datasets for k in ds.batch_manager.bucket_resos)
         except Exception:
             mp_max = 0.25
         do_compile, why = driver.compile_plan(cb, group.num_train_items * max_train_epochs, precision,
-                                              max(0, blocks_to_swap) if precision != "nf4" else 0, mp=mp_max)
+                                              max(0, blocks_to_swap) if precision != "nf4" else 0,
+                                              mp=mp_max * bsz if bsz > 1 else mp_max)
         if cb == "auto":
             logger.info("[compile] auto: %s - %s", "ENABLED (checkpoint outside)" if do_compile == "outside"
                         else ("ENABLED" if do_compile else "off"), why)
@@ -1319,7 +1412,7 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
         paired = any(d.get("control_directory") for d in user_config.get("datasets", []))
         if (quant.card_gb() < quant.NOGC_MIN_CARD_GB or finetune or slider or paired or auto_recaption
                 or str(network_type).lower() != "lora"
-                or gradient_accumulation_steps > 1):
+                or gradient_accumulation_steps > 1 or bsz > 1):     # a batch: the figures are for one picture
             gradient_checkpointing = True
         else:
             kind, mp_ck = driver.nogc_load(group)
@@ -1397,6 +1490,29 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
                 if len(dop_cond) < len(caps):
                     logger.info(f"[dop] {len(caps) - len(dop_cond)} image(s) have no trigger in the caption - "
                                 "they train as usual, with no preservation step")
+    # ---- caption dropout: the empty caption, encoded once, trains in place of the picture's on that share of steps
+    uncond = None
+    caption_dropout = float(caption_dropout or 0.0)
+    if caption_dropout > 0:
+        why = ("a slider trains a dial, not a caption" if slider else
+               "it needs the text encoder (--text_encoder)" if not te_path else
+               f"{desc.display_name} has its own" if not desc.caption_dropout else "")
+        cache_dirs = [getattr(ds, "cache_directory", "") for ds in group.datasets if getattr(ds, "cache_directory", "")]
+        if why or not cache_dirs:
+            logger.warning(f"[caption dropout] off: {why or 'no text cache folder'}")
+        else:
+            from fizgig.families import cache as _cache
+            up = os.path.join(cache_dirs[0], f"uncond_{desc.arch_id}_te.safetensors")
+            if not _cache.cond_file_matches(up, ""):
+                te = driver.load_text_encoder(te_path, device)
+                try:
+                    _cache.save_cond_file(desc, up, "", driver.encode_text(te, [""])[0], "uncond")
+                finally:
+                    driver.unload_text_encoder(te)
+                    del te
+                    torch.cuda.empty_cache()
+            uncond = _load_dop_cond(up)
+            logger.info(f"[caption dropout] {caption_dropout:g} of steps train with no caption")
     dop_every = max(1, int(dop_every or 1))
     if dop_cond:
         # each new shape compiles its own graph. The DOP pass's trigger-free captions bring text lengths the run's
@@ -1431,7 +1547,8 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
     if sample_prompts and sample_every_n_epochs and te_path and vae_path:
         logger.info("[sample] encoding %d preview prompt(s) with %s", len(sample_prompts), desc.text_encoder_label)
         if sample_reference:
-            ref_imgs, (sample_width, sample_height) = _load_references(sample_reference, sample_width, sample_height)
+            ref_imgs, (sample_width, sample_height) = _load_references(sample_reference, sample_width, sample_height,
+                                                                    desc.rgba)
             logger.info(f"[sample] edit previews from {len(ref_imgs)} reference image(s) at "
                         f"{sample_width}x{sample_height}")
             te = driver.load_reference_text_encoder(te_path, device)
@@ -1480,7 +1597,9 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
         logger.warning("[adapter] no training adapter for this run")
     if context_lora_path:
         n = net.add_file(context_lora_path, CONTEXT, context_lora_strength)
-        driver.frozen_file_added(dit, context_lora_path, context_lora_strength, "context")
+        if n + driver.frozen_file_added(dit, context_lora_path, context_lora_strength, "context") == 0:
+            raise RuntimeError(f"Context LoRA {os.path.basename(context_lora_path)} matched no {desc.display_name} "
+                               f"layers: is it a {desc.display_name} LoRA?")
         logger.info(f"[context] {os.path.basename(context_lora_path)} frozen + active at {context_lora_strength:g} "
                     f"({n} Linears)")
     def _add_speed(strength):
@@ -1619,7 +1738,7 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
             except (OSError, ValueError):
                 pass
         opt_params = params
-        if str(optimizer_type or "").lower() == "automagic3":
+        if str(optimizer_type or "").lower() in ("automagic3", "automagic4"):
             groups = _optimizer_family_groups(desc, net, learning_rate)
             if groups:                   # one rate per group: each family of modules finds its own
                 opt_params = groups
@@ -1627,7 +1746,8 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
                     f"{g['family']} ({g['modules']} modules)" for g in groups) + " - each votes its own rate")
             if desc.automagic_sign_window and "polarity_history" not in (optimizer_args or ""):
                 optimizer_args = f"{optimizer_args or ''} polarity_history={desc.automagic_sign_window}".strip()
-                logger.info(f"[optimizer] Automagic v3: sign window {desc.automagic_sign_window} (this family's "
+                _v = "v4" if str(optimizer_type).lower() == "automagic4" else "v3"
+                logger.info(f"[optimizer] Automagic {_v}: sign window {desc.automagic_sign_window} (this family's "
                             f"default; set polarity_history in Optimizer Args to override)")
         _oargs = optimizer_args or ""
         if (desc.optimizer_weight_decay is not None and "weight_decay" not in _oargs
@@ -1638,9 +1758,14 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
     if owns_its_rate(optimizer):        # Automagic v3 sets its own rate: the watcher and schedulers stand down
         if adaptive_lr:
             logger.info("[adaptive_lr] ignored - the optimizer sets its own learning rate")
-        if per_image_lr or warmup_look_outliers:
-            logger.info("[per-image LR] per-image LR and the look warm-up are off - the optimizer sets its own rate")
-        adaptive_lr = per_image_lr = warmup_look_outliers = False
+        if optimizer.__class__.__name__ == "Prodigy":    # per-image LR stays: it weights each picture's loss
+            if warmup_look_outliers:
+                logger.info("[per-image LR] the look warm-up is off - the optimizer sets its own rate")
+            adaptive_lr = warmup_look_outliers = False
+        else:
+            if per_image_lr or warmup_look_outliers:
+                logger.info("[per-image LR] per-image LR and the look warm-up are off - the optimizer sets its own rate")
+            adaptive_lr = per_image_lr = warmup_look_outliers = False
         logger.info(f"[optimizer] {opt_label} owns the learning rate from here ({learning_rate:.2e} is its start); "
                     f"the LR scheduler stands down")
     box_learning_rate = learning_rate   # the Learning Rate box, before adaptive LR's midpoint (saved for a resume)
@@ -1673,6 +1798,12 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
         start_epoch, global_step, meta = _load_state(resume_state_dir, net, optimizer, device, arch,
                                                      untagged_own=desc.resumes_untagged_states, driver=driver)
         if global_step is None:
+            global_step = start_epoch * steps_per_epoch
+        elif int(meta.get("batch_size", 1)) != bsz:
+            # it trained at another Batch size (moved to or from a pod that batches): a state is an epoch end, so the
+            # steps so far are its epochs at this run's steps per epoch - the LR schedule carries on from there
+            logger.info(f"[resume] it trained {meta.get('batch_size', 1)} picture(s) a step and goes on at {bsz}: "
+                        f"step {global_step} -> {start_epoch * steps_per_epoch}")
             global_step = start_epoch * steps_per_epoch
         if adaptive:
             adaptive.load_state_dict(meta.get("adaptive_lr_state"))
@@ -2127,7 +2258,8 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
                 _save_state(output_dir, output_name, net, optimizer, epoch=epoch, global_step=global_step,
                             arch_id=arch, ema=ema,
                             extra={"learning_rate": box_learning_rate,
-                                   **({"adaptive_lr_state": adaptive.state_dict()} if adaptive else {})})
+                                   **({"adaptive_lr_state": adaptive.state_dict()} if adaptive else {}),
+                                   **({"batch_size": bsz} if bsz > 1 else {})})
                 return True
             except (OSError, RuntimeError) as e:
                 if attempt == 2 and required:
@@ -2238,6 +2370,8 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
                 except OSError:
                     pass
 
+    last_gn = [None]
+
     def _update():
         nonlocal pending
         if ftr is not None and ftr.fused is not None:
@@ -2246,12 +2380,14 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
             return
         if max_grad_norm:
             pre = torch.nn.utils.clip_grad_norm_(params, max_grad_norm)
+            last_gn[0] = float(pre)        # the run card's Grad norm
             if adaptive is not None and adaptive.clip_signal:
                 adaptive.record_clip(pre, max_grad_norm)
         m = sum(lr_acc) / len(lr_acc) if lr_acc else 1.0
         lr_acc.clear()
-        if optimizer.__class__.__name__ == "Automagic3":
-            m = 1.0                        # Automagic v3 owns the rate (as on the old H3 trainer)
+        if optimizer.__class__.__name__ in ("Automagic3", "Automagic4"):
+            m = 1.0                        # Automagic owns the rate (as on the old H3 trainer); Prodigy's lr is a
+            #                                multiplier, so a step policy's or LR boost's scale composes into it
         if m != 1.0:                       # the window's mean, composed into the LR for this step only (never the loss:
             held = [g["lr"] for g in optimizer.param_groups]        # Adam is invariant to a constant on the gradient)
             for g in optimizer.param_groups:
@@ -2283,7 +2419,17 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
         share didn't come back - the helper's images of each of the round's epochs again (only: those keys), so
         both sides stay in step: every image trains every epoch whatever happens to the helper."""
         nonlocal global_step
+        low = _low_share(epoch)
+        if low > 0 and low < 1:
+            logger.info(f"[stages] epoch {epoch + 1}: {low * 100:.0f}% of steps at the smaller size")
+        elif low == 1 and epoch == 0:
+            logger.info("[stages] training at the smaller size")
+        elif low_loader is not None and epoch > 0 and _low_share(epoch - 1) > 0 and low == 0:
+            logger.info(f"[stages] epoch {epoch + 1}: the full size from here")
         for i, batch in enumerate(loader):
+            # the step's size from the epoch and the step, so a resumed run draws the same
+            if low and random.Random((epoch + 1) * 100003 + i).random() < low:
+                batch = _low_batch()
             yield i, batch, None
         sn = share_now[0]
         if share_worker is not None or sn is None or epoch + 1 != sn["last"]:
@@ -2528,18 +2674,25 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
                     _p.requires_grad_(True)
                 loss, _info = torch.tensor(_l), {"t": _t}
             else:
-                cond = driver.batch_cond(batch, device)
-                refs = [batch[k].to(device) for k in sorted((k for k in batch if k.startswith("latents_control_")),
-                                                            key=lambda k: int(k.rsplit("_", 1)[1]))]
-                # per-step routing (a family's step_frozen_blocks): those blocks' trainable weights sit out this
-                # step's forward and backward, so the backward stops at the first trained block and they get no grad
-                _frozen_now = _step_freeze(driver.step_frozen_blocks(batch))
-                _lm = _loss_mask(batch)
-                loss, _info = driver.training_loss(dit, latents, cond, gen, min_t=min_timestep, max_t=max_timestep,
-                                                   **({"refs": refs} if refs else {}),
-                                                   **({"loss_mask": _lm} if _lm is not None else {}),
-                                                   **({"prior": prior} if prior is not None and _lm is not None
-                                                      else {}))
+                if bsz > 1:
+                    _frozen_now = _step_freeze(driver.step_frozen_blocks(batch))
+                    loss, _info = _batch_loss(batch, latents)
+                else:
+                    cond = driver.batch_cond(batch, device)
+                    # caption dropout: this step's draw from the step number, so a resumed run drops the same steps
+                    if uncond is not None and random.Random(global_step * 7919 + 17).random() < caption_dropout:
+                        cond = {**cond, **{k: v.to(device) for k, v in uncond.items()}}
+                    refs = [batch[k].to(device) for k in sorted((k for k in batch if k.startswith("latents_control_")),
+                                                                key=lambda k: int(k.rsplit("_", 1)[1]))]
+                    # per-step routing (a family's step_frozen_blocks): those blocks' trainable weights sit out this
+                    # step's forward and backward, so the backward stops at the first trained block and they get no grad
+                    _frozen_now = _step_freeze(driver.step_frozen_blocks(batch))
+                    _lm = _loss_mask(batch)
+                    loss, _info = driver.training_loss(dit, latents, cond, gen, min_t=min_timestep, max_t=max_timestep,
+                                                       **({"refs": refs} if refs else {}),
+                                                       **({"loss_mask": _lm} if _lm is not None else {}),
+                                                       **({"prior": prior} if prior is not None and _lm is not None
+                                                          else {}))
                 if "lr_mult" in _info and lr_acc:
                     lr_acc[-1] *= _info["lr_mult"]     # where the step landed (the H3 noise-band LR)
                 if pending == 0 and optimizer is not None:
@@ -2559,6 +2712,8 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
                     dop_sum[0] += _dl.item()
                     dop_sum[1] += 1
                     _dc = None
+                if ftr is not None and ftr.fused is not None:
+                    ftr.fused.scale = lr_acc[-1] if lr_acc else 1.0   # each weight steps in this backward's hooks
                 (_scaled / accum if accum > 1 else _scaled).backward()
                 if _dc is not None and ftr is None:
                     dop_sum[0] += _dop_step(driver, dit, net, latents, _dc, gen, weight=dop_weight,
@@ -2585,7 +2740,10 @@ def train_family(family, dit_path, dataset_config, output_dir, output_name, *, n
                     previews(epoch + 1)
                     progress.start_t += time.time() - _tp
             watch.observe(epoch + 1, global_step, batch, _info.get("t", 0.5), loss.item())
-            progress.set_postfix(avr_loss=f"{recorder.moving_average:.4f}", refresh=False)
+            # the run card's Learning: loss, the step's learning rate (Adaptive LR's, Automagic's) and grad norm
+            progress.set_postfix(avr_loss=f"{recorder.moving_average:.4f}",
+                                 lr=f"{float(optimizer.param_groups[0]['lr']):.2e}" if optimizer is not None else "-",
+                                 **({"gn": f"{last_gn[0]:.3f}"} if last_gn[0] is not None else {}), refresh=False)
             progress.update(1)
 
         if pending:                        # a partial group: settle the optimizer before the epoch-end work
@@ -2864,6 +3022,13 @@ def setup_parser():
                    help="experimental: items whose name contains PATTERN train at MULT x the LR on their step")
     p.add_argument("--dop_ft_samples", type=int, default=8,
                    help="DOP on a fine-tune: the original model's predictions made per image before the first step")
+    p.add_argument("--stage_dataset_config", default=None,
+                   help="Start at a smaller size: that size's dataset TOML (its own cache folder)")
+    p.add_argument("--stage_until", type=float, default=0.3,
+                   help="the share of the run at the smaller size (the change blends over --stage_blend of it)")
+    p.add_argument("--stage_blend", type=float, default=0.1, help="the share of the run the change blends over")
+    p.add_argument("--caption_dropout", type=float, default=0.0,
+                   help="the share of steps that train with no caption (the empty caption's encoding, made once)")
     p.add_argument("--masked_training", action="store_true",
                    help="weight each picture's loss by its mask (photo-masklabel.png beside photo.png): white counts "
                         "fully, grey partly, black at --mask_floor; pictures without a mask train as normal")
@@ -2938,7 +3103,8 @@ def main():
         dop_ft_samples=a.dop_ft_samples,
         lr_boost=[(x.split("=", 1)[0], float(x.split("=", 1)[1])) for x in a.lr_boost if "=" in x] or None,
         share_worker=a.share_worker, masked_training=a.masked_training, mask_floor=a.mask_floor,
-        mask_prior=a.mask_prior)
+        mask_prior=a.mask_prior, caption_dropout=a.caption_dropout, stage_dataset_config=a.stage_dataset_config,
+        stage_until=a.stage_until, stage_blend=a.stage_blend)
 
 
 if __name__ == "__main__":

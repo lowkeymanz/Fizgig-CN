@@ -79,6 +79,11 @@ class FamilyDriver:
         INT8 / NF4 are applied afterwards by families/quant.py to the block map's Linears; the driver only loads."""
         raise NotImplementedError
 
+    def dit_gb(self, path: str) -> float:
+        """The DiT as load_dit loads it, in GB, for sizing precision and RAM: the file's size. A driver that
+        decodes a smaller file at load (an int8 build read as bf16) gives the decoded size."""
+        return os.path.getsize(path) / 1e9
+
     # ---- block swap (optional) --------------------------------------------------------------------
     def max_blocks_to_swap(self, dit=None) -> int:
         """How many blocks may stream between CPU and GPU; 0 = the family has no block swap."""
@@ -239,6 +244,30 @@ class FamilyDriver:
         Returns (loss tensor, info dict e.g. {"t": 0.63}). Owns the family's noise/target/timestep rules."""
         raise NotImplementedError
 
+    def training_loss_batch(self, dit, latents, cond: dict, generator, *, min_t: float = 0.0, max_t: float = 1.0,
+                            loss_mask=None):
+        """Batch Size above 1 (description batch_training): latents (B, C, h, w) of one bucket, cond = the B pictures'
+        batch_cond dicts joined by stack_conds, loss_mask (B, 1, h, w) or None. Each picture draws its noise and
+        timestep in the order B training_loss calls would, so with the same generator the loss is the mean of
+        theirs. Returns (loss tensor, info dict with "t", the pictures' mean)."""
+        raise NotImplementedError
+
+    def stack_conds(self, conds: list):
+        """B pictures' batch_cond dicts (each batch 1) -> one dict with a batch of B, or None when their shapes
+        differ: the trainer then runs each shape's pictures as their own group. Nothing is padded, so a group trains
+        as its pictures would one at a time."""
+        import torch
+        keys = list(conds[0])
+        if any(list(c) != keys for c in conds):
+            return None
+        out = {}
+        for k in keys:
+            vs = [c[k] for c in conds]
+            if not all(torch.is_tensor(v) and v.shape == vs[0].shape for v in vs):
+                return None
+            out[k] = torch.cat(vs)
+        return out
+
     # ---- prompt-pair sliders (optional) ------------------------------------------------------------
     def slider_setup(self, group) -> None:
         """A slider run's data is known (an image-pair group, or a prompt slider's practice bank)."""
@@ -344,6 +373,12 @@ class FamilyDriver:
         Default: as is."""
         return sd
 
+    def export_lora_state_dict(self, sd: dict) -> dict:
+        """The LoRA file's tensors as written for export - the inverse of convert_lora_state_dict. Fibo 2.0's ComfyUI
+        driver fuses the separate q/k/v (and w1/w3) projections back together here so the exported keys match the
+        ComfyUI checkpoint; default: as is."""
+        return sd
+
     def lora_target_names(self, dit) -> list:
         """Dotted module names (relative to dit) of the Linears a LoRA wraps: every module in the block map."""
         return [m for g in self.block_map(dit) for b in g.blocks for m in b.modules]
@@ -396,11 +431,12 @@ class FamilyDriver:
         dit.offloader = streamer
         dit.blocks_to_swap = 1
 
-    def frozen_file_added(self, dit, path: str, strength: float, role: str) -> None:
+    def frozen_file_added(self, dit, path: str, strength: float, role: str) -> int:
         """A frozen LoRA file (role "adapter": on for training, off in previews; "context": on for both; "speed": the
         preview speed LoRA, on for previews only) has been
         added to the family LoRA. A family whose LoRAs carry weights the family LoRA cannot wrap (H3's AdaLN rows on
-        the pruned base, injected at run time) applies them here."""
+        the pruned base, injected at run time) applies them here and returns how many it applied."""
+        return 0
 
     # ---- room beside the training model (preview decode, override encode) ----------------------------
     def park_for(self, dit, device, need_gb, purpose: str):
@@ -448,12 +484,19 @@ class FamilyDriver:
         why)."""
         return None
 
+    def plan_pictures(self, precision: str, blocks_to_swap: int, *, megapixels: float, pictures: int,
+                      run: dict) -> Optional[tuple]:
+        """A family with its own Auto plan (plan_run): that plan for pictures of `megapixels`, `pictures` a step,
+        with no dataset - (precision, blocks_to_swap) - for the Batch size note and a moved run's batch
+        (web/batch_plan). None: the shared plan over the description's train_memory."""
+        return None
+
     def nogc_load(self, group) -> tuple:
         """What the checkpointing-off figures are read at: (kind, megapixels). kind "" reads
         description.train_memory_nogc[precision], any other reads [f"{precision}:{kind}"]. Default: the largest
         bucket, as stills."""
         try:
-            return "", max(w * h / 1e6 for ds in group.datasets for (w, h) in ds.batch_manager.bucket_resos)
+            return "", max(k[-2] * k[-1] / 1e6 for ds in group.datasets for k in ds.batch_manager.bucket_resos)
         except Exception:
             return "", 1.0
 

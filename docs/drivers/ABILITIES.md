@@ -45,9 +45,21 @@ The full field list, with comments, is `FamilyDescription` in `src/fizgig/famili
 | `train_areas` | Model Area to Train: named block sets with optional timestep windows, plus a Custom block pick. |
 | `identity_blocks` | Fast Identity Mode: a standard LoRA trains only the identity blocks, faster. |
 | `multi_concept`, `multi_concept_defaults`, `multi_concept_hint` | The Subjects card's "Who is this LoRA of?" (2 to 4 subjects): extra subject folders, each its own dataset block. The card's protection choices (DOP, the side-by-side pictures) need nothing more from a driver than training does. |
+| `batch_training` | Batch size in Other Options: several pictures of one size bucket in one forward. The driver gives `training_loss_batch` (each picture draws its noise and timestep in the order its own `training_loss` would, the loss is their mean) and, when its captions vary in length, `stack_conds` (pad with a mask the model honours per picture, or keep each caption apart; the default stacks only same-shape captions and the trainer groups the rest). Opt in only after a parity check: from the same generator, the batched loss equals the mean of the pictures' own losses. Sliders, edits, fine-tunes, DOP, LoRA Isolation, the per-image loss watch, Start at a smaller size and the mask prior stay at batch 1 by themselves. |
+| `caption_dropout` (default on) | Caption dropout in Other Options: that share of steps trains on the empty caption's encoding, made once with the family's own `encode_text`. Turn it off for a family with its own (H3) or no pictures (ACE-Step). |
 | `options` (`FamilyOption`) | Your own Training / Samples tab controls; each value becomes trainer flags, `--family_option` pairs for `set_options`, or cache `--aux` values. |
 
 The Context LoRA (train on top of another LoRA, frozen) needs nothing; every family has it.
+
+## Start checks
+
+Before a run starts, Fizgig lists what looks wrong, as warnings with **Start anyway** (never a block): pictures with no caption, captions without the trigger word, and a learning rate outside the model's usual range (`launch.start_checks`). The first two need nothing from a family. The third is declared:
+
+| Field | What users get |
+|---|---|
+| `start_lr_bands` | `((kind, low, high), ...)` for `"lora"`, `"finetune"` and `"slider"`: a rate outside is a warning at Start (only with Adaptive LR off, and never for an optimizer that sets its own rate). |
+
+Set each band from your shipped presets: a third of the lowest preset's learning rate to three times the highest, for each kind the family offers. Leave a kind out when nothing measured says what's usual (MiniMax H3's LoRAs train on Automagic, so it declares only its slider band). Update the band when you change a preset's rate.
 
 ## Workbench
 
@@ -67,6 +79,6 @@ These change text only, so the family reads right without per-family GUI code:
 
 - **Preferences:** `prefs_title`, `prefs_intro`, `prefs_note`, `fetch_note`, `fetch_optional_label`, and per model file `hint`, `download_label`, `download_note`, `alt_repo` / `alt_path` (a second build of the same file), `gated`.
 - **New files:** `ModelFile.announce` + `announce_intro`, a one-time popup for users who set the family up before the file existed.
-- **Training tab:** `model_note` (under the Base Model picker), `preset_notes`, `network_hint`, `ema_hint`, `precision_labels`, `precision_hint`, `compile_hint`.
+- **Training tab:** `model_note` (under the Base Model picker; usage only, never the licence, which goes in the family's guide), `preset_notes`, `network_hint`, `ema_hint`, `precision_labels`, `precision_hint`, `compile_hint`.
 - **Samples tab:** `samples_text` (per-place wording, including `"sampler"`: the sampler and schedule named beside the Steps box), `samples_cfg_free` (hide CFG and the negative for a CFG-free model), `preview_cfg_note`, `preview_negative` (the default negative prompt; each family keeps the user's own edit, and `None` greys the box).
 - **Repair Studio:** `repair_size` (its starting preview size; 1024 for a 1 MP model).

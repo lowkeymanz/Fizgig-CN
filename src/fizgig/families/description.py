@@ -65,6 +65,10 @@ class ModelFile:
     # a part that ships inside another model file (a single-file checkpoint's VAE / text encoders): the pref key of
     # that file, used when this row is left empty - the row stays as an optional override (e.g. a fixed VAE)
     inside: str = ""
+    # another family's Preferences row for the same file (Z-Image Base's VAE / text encoder / Turbo DiT are Z-Image
+    # Turbo's): Download models for me links this row to that file when it is set and on disk, instead of fetching a
+    # second copy into the models folder
+    same_as: str = ""
 
     @property
     def fetch_is_optional(self) -> bool:
@@ -142,6 +146,10 @@ class LoRAFormat:
     lokr_kohya_stems: bool = False
     note: str = ""
     source: str = ""
+    # True: every LoRA file written for the family (training saves, Save Repaired, Extract) goes through
+    # driver.export_lora_state_dict into the checkpoint's own layout, and a resume reads it back through
+    # convert_lora_state_dict. For a model whose ComfyUI checkpoint fuses Linears the driver trains split.
+    save_fused: bool = False
 
     def module_of(self, key: str) -> Optional[str]:
         """Dotted module path of a down-weight key ('transformer.modulation.1.lora_A.weight' -> 'modulation.1'),
@@ -251,6 +259,7 @@ class FamilyOption:
     show_if_media: str = ""           # shown only when the dataset holds this media kind ("clip", "voice")
     mixed_only: bool = False          # shown only when the dataset mixes voice with photos or clips
     isolation_off: bool = False       # a check that can't run with Fizgig LoRA Isolation: off and greyed while it's on
+    batch_off: bool = False           # a check that reads one picture a step: off and greyed while Batch size is above 1
     requires: str = ""                # shown (and sent) only while this check is ticked ("KEY") or this choice is
     #                                   picked ("KEY=LABEL", matched as pick() matches)
     suggestions: tuple = ()           # entry: ready-made values offered in an editable dropdown ("6-49 · why")
@@ -265,7 +274,7 @@ class FamilyOption:
     split_hint: str = ""
     # entry: a Slide mode (with or without Split) - (first value, hold to epoch, value after, reached by epoch[, every
     # N epochs after]); the value is then "first:hold:after:by", a straight line from the hold epoch to the last, and
-    # with the tick ":N", every N epochs after it one epoch at the first value; `slide_hint` replaces the hint
+    # with the tick ":N", after it the higher value with every Nth epoch at the lower; `slide_hint` replaces the hint
     slide: tuple = ()
     slide_hint: str = ""
     single: str = ""                  # Single's value to start with when the default is a Split or Slide value
@@ -440,6 +449,9 @@ class FamilyDescription:
     # Training tab shows the fine-tune card and the launch sends --finetune. Optional - most families never need it
     finetune: bool = False
     ft_learning_rate: float = 1e-5    # the learning rate choosing Fine-tune sets (H3's tested rate is 3e-5)
+    # the family's own values a kind of training sets when it's picked ((kind, ((key, value), ...)), ...): MOSS-Image's
+    # Clean-end share differs for a fine-tune and a LoRA
+    kind_values: tuple = ()
     ft_regularisation: bool = True    # the fine-tune card offers a regularisation set (photos of the broad class)
     # the Training tab's large-dataset hint: (rate, steps per epoch) - a standard LoRA whose learning rate (or
     # adaptive Min LR) is at least `rate`, on more than `steps` steps an epoch, gets a tip suggesting a cooler rate,
@@ -454,6 +466,8 @@ class FamilyDescription:
     # the Captions tab's "Caption Every Song" card: every audio file gets "<trigger>, <common words>", no AI. The
     # string is the greyed example shown in the empty Common words box. "" = no card
     song_captions: str = ""
+    # the Samples tab's first preview prompt for this family; "" = form.DEFAULTS' "A high quality photo" (a photo model)
+    sample_prompt: str = ""
     # training previews may render on the preview checkpoint (the preview_dit file, sampled with
     # preview_checkpoint_sampling) instead of the training model - Klein's Distilled previews. The driver brings the
     # memory handoff (park_for_preview / load_preview_checkpoint / unpark_after_preview)
@@ -494,6 +508,7 @@ class FamilyDescription:
     # block)}; the peak may instead be ((megapixels, GB), ...) points, interpolated for the run's resolution.
     # {} = Auto just takes the first precision
     train_memory: dict = field(default_factory=dict)
+    own_plan: bool = False            # no train_memory: the driver plans precision + swap itself (plan_run, plan_pictures)
     # the same peak with gradient checkpointing OFF, compiled blocks, no swap: {precision: ((megapixels, GB), ...)}.
     # A compiled LoRA run with no swap trains without checkpointing (13-27% faster) when this fits with a margin;
     # a precision missing here (nf4: its dequantised weights stay alive for backward) always checkpoints
@@ -524,6 +539,34 @@ class FamilyDescription:
     # masked training (fizgig/dataset/masks.py): the driver's training_loss takes loss_mask; opt in, so a family added
     # later never gets a tick its driver can't honour
     masked_training: bool = False
+    # see-through pictures (an RGBA VAE: Qwen Image 2.1): the latent cache keeps a picture's alpha when some of it is
+    # transparent, and the driver's decode returns RGBA when the render is; off: the alpha is dropped, as for RGB VAEs
+    rgba: bool = False
+    # caption dropout (families/train.py): a share of steps trains on the empty caption's encoding, made once at the
+    # start with the family's own text encoder; off for a family with its own (H3) or no pictures (ACE-Step)
+    caption_dropout: bool = True
+    # Batch Size above 1 (Other Options): the driver's training_loss_batch trains several pictures of one bucket in
+    # one forward. Opt in only when it is exact - each picture's loss as its own step would give - for captions of
+    # one shape (families/train.py runs each caption shape's pictures as their own group, never padding them)
+    batch_training: bool = False
+    # what each picture past the first adds to a batched step's peak (gradient checkpointing on, as a batch always
+    # trains): (GB a picture, GB a picture per megapixel). Auto and the Batch size note plan train_memory's peak +
+    # (fixed + per_mp x megapixels) x (pictures - 1). Measured from peak VRAM at batch 1 and 3 at 0.25 and 1 MP -
+    # train_memory's own curve is the preview's peak on some families (flat across sizes), so it says nothing about
+    # a training step's pictures
+    batch_gb: tuple = (0.0, 0.0)
+    # the learning rates the Start checks call usual (launch.start_checks): ((kind, low, high), ...) for "lora",
+    # "finetune" and "slider" - a third of the lowest shipped preset to three times the highest; a rate outside is a
+    # warning at Start, never a block. A kind left out has no rule (an optimizer that sets its own rate has none)
+    start_lr_bands: tuple = ()
+    # Start at a smaller size (families/train.py): the first share of a standard LoRA's epochs at a smaller Target
+    # Megapixels, blended into the full size; its own cache folder (a latent file is named by the picture's size,
+    # not the training size). Off for clips (H3) and a family with no pictures (ACE-Step)
+    resolution_stages: bool = True
+    # Detail crops (dataset/detail_crops.py): a training folder switched to them in Image Prep also trains one square
+    # crop of each picture at its own scale (brushwork 1:1), at the size the run trains at; off for clips (H3) and a
+    # family with no pictures (ACE-Step)
+    detail_crops: bool = True
     network_hint: str = ""            # the line under Network Type in place of the LoRA / LoKR trade
     ema_hint: str = ""                # the line under Weight averaging (EMA) in place of the shared one
     ema_section: str = ""             # "other": the EMA row sits in Other Options (MiniMax H3's place)

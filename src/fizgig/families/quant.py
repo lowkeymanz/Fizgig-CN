@@ -81,12 +81,12 @@ def _quantize_one(m, driver, precision, compute_device, store_device=None):
 STREAM_HEADROOM_GB = 6.0     # what the rest of the run takes in RAM beside the model file while it loads
 
 
-def _ram_short(path):
+def _ram_short(driver, path):
     """The bf16 model file would not fit in the RAM that's free (on a pod, its own limit, via container_ram): the
     one case the base is streamed. With RAM to spare the whole-file load runs as it always has."""
     try:
         import psutil
-        return os.path.getsize(path) / 1e9 + STREAM_HEADROOM_GB > psutil.virtual_memory().available / 1e9
+        return driver.dit_gb(path) + STREAM_HEADROOM_GB > psutil.virtual_memory().available / 1e9
     except Exception:
         return False
 
@@ -123,7 +123,7 @@ def _stream_fill(dit, driver, f, dtype, path, device, precision, swap):
         if mod in targets:
             owned.setdefault(mod, []).append(k)
     rest = [k for k in keys if k.rpartition(".")[0] not in targets]
-    logger.info(f"[precision] RAM is short for the whole {os.path.getsize(path) / 1e9:.0f} GB file: "
+    logger.info(f"[precision] RAM is short for the whole {driver.dit_gb(path):.0f} GB model: "
                 f"loading it a Linear at a time and quantising each to {precision} as it arrives")
     dit.load_state_dict({k: read(k) for k in rest}, strict=False, assign=True)
     compute_device, store_device = torch.device(device), ("cpu" if swap else None)
@@ -166,7 +166,7 @@ def load_base(driver, path, device, precision="bf16", blocks_to_swap=0, supports
         dit = driver.load_dit(path, device)
         return dit, 0
     dit = None
-    if precision != "bf16" and hasattr(driver, "stream_dit") and _ram_short(path):
+    if precision != "bf16" and hasattr(driver, "stream_dit") and _ram_short(driver, path):
         dit = _stream_load(driver, path, device, precision, swap)
     if dit is None:
         dit = driver.load_dit(path, "cpu" if (swap or precision != "bf16") else device)
@@ -198,7 +198,7 @@ def _peak(entry, megapixels):
 TIGHT_MARGIN_GB = 0.5      # nf4 with no swap beats a swapped int8 base down to this much headroom
 
 
-def plan(desc, driver, precision="auto", blocks_to_swap=-1, free_gb=None, margin_gb=1.5, megapixels=1.0):
+def plan(desc, driver, precision="auto", blocks_to_swap=-1, free_gb=None, margin_gb=1.5, megapixels=1.0, pictures=1):
     """Resolve 'auto' precision and/or block swap (-1) from free VRAM and the description's measured training
     memory (desc.train_memory: {precision: (peak GB at no swap, GB saved per swapped block)}).
 
@@ -206,10 +206,12 @@ def plan(desc, driver, precision="auto", blocks_to_swap=-1, free_gb=None, margin
     far more speed than quantisation. If none fits with the full margin, nf4 still goes first when it fits with a
     small one: swapping int8 instead cost 4.4x the step time and 4x the CPU on a 16 GB card (#216; measured July
     2026). Only if nothing fits does it swap (int8, the smaller swappable base). An explicit precision with auto swap
-    gets the fewest blocks that fit. Returns (precision, blocks_to_swap, reason)."""
+    gets the fewest blocks that fit. pictures: a batched step's (Batch size), each past the first adding
+    desc.batch_gb's figure at megapixels. Returns (precision, blocks_to_swap, reason)."""
     if free_gb is None:
         free_gb = free_vram_gb()
-    mem = {p: (_peak(v, megapixels), v[1]) for p, v in (desc.train_memory or {}).items()}
+    extra = batch_extra(desc, megapixels, pictures)
+    mem = {p: (_peak(v, megapixels) + extra, v[1]) for p, v in (desc.train_memory or {}).items()}
     offered = [p for p in PRECISIONS if p in desc.precisions]
     if precision == "auto" and getattr(desc, "auto_precisions", ()):
         offered = [p for p in desc.auto_precisions if p in desc.precisions]
@@ -247,6 +249,23 @@ def plan(desc, driver, precision="auto", blocks_to_swap=-1, free_gb=None, margin
         n = swap_for(precision)
         return precision, n, (f"{n} swapped blocks to fit {free_gb:.1f} GB" if n else f"fits {free_gb:.1f} GB")
     return precision, blocks_to_swap, "as set"
+
+
+def batch_extra(desc, megapixels=1.0, pictures=1):
+    """GB a batched step needs past one picture's: desc.batch_gb (fixed, per megapixel) for each picture after the
+    first."""
+    fixed, per_mp = getattr(desc, "batch_gb", None) or (0.0, 0.0)
+    return max(0, int(pictures) - 1) * (float(fixed) + float(per_mp) * float(megapixels))
+
+
+def fits(desc, precision, blocks_to_swap, free_gb, megapixels=1.0, pictures=1, margin_gb=1.5):
+    """Whether `precision` with `blocks_to_swap` swapped fits free_gb by the description's figures (as plan() weighs
+    them); True when there is no figure for it."""
+    if precision not in (desc.train_memory or {}):
+        return True
+    v = desc.train_memory[precision]
+    extra = batch_extra(desc, megapixels, pictures)
+    return _peak(v, megapixels) + extra - max(0, blocks_to_swap) * v[1] <= free_gb - margin_gb
 
 
 def share_shortfall(desc, driver, precision, blocks_to_swap, megapixels, free_gb=None, margin_gb=0.5):
