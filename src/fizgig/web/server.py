@@ -154,6 +154,22 @@ def list_gpus():
     return [row] if row else []
 
 
+_CARD_GB = {}
+
+
+def _card_total_gb(prefs):
+    """The training card's size in GiB (Preferences' cuda_device, else the first), kept 5 minutes - the Training tab
+    asks on every change and the card doesn't change. None when there's no GPU to read."""
+    want = str((prefs or {}).get("cuda_device") or "")
+    hit = _CARD_GB.get(want)
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    row = _chosen_gpu(list_gpus(), want)
+    total = row["total_gb"] if row else None
+    _CARD_GB[want] = (time.time(), total)
+    return total
+
+
 def _chosen_gpu(rows, want):
     """The row for Preferences' cuda_device (an index or a GPU-… uuid), else the first card."""
     want = str(want or os.environ.get("CUDA_VISIBLE_DEVICES") or "").split(",")[0].strip()
@@ -459,6 +475,19 @@ def update_prefs(changes: dict):
         _write_json(PREFS_FILE, p)
 
 
+def _repair_model_links():
+    """A Preferences row pointing at another model's file (Klein 9B's and Z-Image's VAEs, both once saved as
+    ae.safetensors): moved to the right file, once at start (fetch_models.repair_links). Never stops the start."""
+    try:
+        from fizgig.scripts.fetch_models import repair_links
+        with _lock:
+            p = _read_json(PREFS_FILE)
+            if p and repair_links(p, user_data.MODELS_DIR, log=lambda m: logger.info("[models]%s", m[1:])):
+                _write_json(PREFS_FILE, p)
+    except Exception as e:
+        logger.warning(f"[models] couldn't check the model files' links: {e}")
+
+
 def pref_path(prefs, key) -> str:
     """A Preferences path as the desktop resolves it (a folder inside Fizgig is stored relative)."""
     v = str(prefs.get(key) or "").strip()
@@ -584,6 +613,9 @@ def _studio_samples(desc):
     turbo = v.get("FAMILY_TURBO_STRENGTH")
     if blank(turbo):
         turbo = spd[1] if spd else 0
+    from fizgig.families.form import turbo_ticked_off
+    if turbo_ticked_off(desc, v):                 # the Use the Turbo LoRA tick off (MOSS-Image)
+        turbo = 0
     f = pref_path(load_prefs(), sp.pref_key) if sp is not None and sp.pref_key else ""
     try:
         live = bool(f and os.path.isfile(f) and float(turbo) > 0)
@@ -743,6 +775,8 @@ def _studio_post(what, b):
         return {"ok": True}
     if what == "keep":
         return {"path": studio.keep_tweaked()}
+    if what == "map":                        # maps over the Tweaked render (where the LoRA acts, the tweaks, the trigger)
+        return studio.map_request(b.get("state") or {}, b.get("trigger") or "", bool(b.get("blocks")))
     if what == "render":
         return studio.render(b.get("state") or {}, extra={k: b.get(k) for k in ("video", "audio", "keyframes", "ref_mode", "mix")
                                                           if b.get(k) is not None})
@@ -1062,7 +1096,7 @@ _SIZE_KEYS = ("DATASET_MEGAPIXELS", "CLIP_MEGAPIXELS")
 # are the same), the save schedule (when checkpoints are written) and the learning rate (the run trains on at the
 # new one, logged); the rest trains on as it was
 _RESUME_SAMPLE_KEYS = ("SAMPLE_PROMPT", "SAMPLE_SEED", "SAMPLE_WIDTH", "SAMPLE_HEIGHT", "SAMPLE_STEPS",
-                       "SAMPLE_CFG_SCALE", "FAMILY_TURBO_STRENGTH", "SAMPLE_CHECKPOINT",   # + previews on the checkpoint
+                       "SAMPLE_CFG_SCALE", "FAMILY_TURBO_STRENGTH", "FAMILY_TURBO_ON", "SAMPLE_CHECKPOINT",
                        "FAMILY_PREVIEW_LOOK",                                              # + the SFT look tick
                        "SAMPLE_EVERY_N_EPOCHS", "SAMPLE_LATER", "SAMPLE_UNTIL_EPOCH", "SAMPLE_EVERY_AFTER",
                        "BLOCKS_SWAP", "SAVE_EVERY_N_EPOCHS", "SAVE_LATER", "SAVE_UNTIL_EPOCH", "SAVE_EVERY_AFTER",
@@ -1958,6 +1992,8 @@ def preview_labels(mode) -> dict:
         line = words.get("checkpoint" if r.get("checkpoint") else "look" if r.get("look") else "base", "")
         if r.get("turbo") and words.get("turbo"):
             line = (words["turbo"] + " " + line).strip()
+        if r.get("small"):                       # Faster, smaller previews (a card under 20 GB)
+            line = (line + f" Rendered smaller ({r['small']}) to save time, so softer than full size.").strip()
         if r.get("helper"):                      # a helper rendered the round (web/helpers.py)
             line = (line.rstrip(".") + f" · rendered on {r['helper']}" if line else f"Rendered on {r['helper']}")
         if line:
@@ -2927,6 +2963,10 @@ class Handler(BaseHTTPRequestHandler):
                                          for k in form.model_keys(d)},
                               "cache_dir": str(p.get("cache_dir") or ""),
                               "settings": {k: str(p.get(k) or "") for k in SETTING_PREFS},
+                              "captioning": {"main": pref_path(p, "krea2_text_encoder"),
+                                             "main_ok": bool(pref_path(p, "krea2_text_encoder")
+                                                             and os.path.isfile(pref_path(p, "krea2_text_encoder"))),
+                                             "others": captions.other_captioners()},
                               "captioner": {"path": str(p.get(captions.SECONDARY_PREF) or ""),
                                             "note": secondary_captioner_note(p),
                                             "links": [{"label": lab, "href": f"https://huggingface.co/{r}/blob/main/{f}"}
@@ -2999,6 +3039,8 @@ class Handler(BaseHTTPRequestHandler):
                                       "application/octet-stream")
             except (ValueError, OSError) as e:
                 return self.json({"error": str(e)}, 400)
+        if path == "/api/captioners/status":          # Preferences' Other captioning models, while one downloads
+            return self.json({"others": captions.other_captioners()})
         if path == "/api/captions/options":
             p = load_prefs()
             cap = captioner_for(p)
@@ -3161,6 +3203,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(d, dict) or not d.get("fizgig_repair_setup"):
                 return self.json({"error": "That file isn't a Studio setup."}, 404)
             return self.json(d)
+        if path == "/api/studio/map":                # the maps over the Tweaked render, once made
+            return self.json(studio.map_status())
         if path == "/api/studio/metrics":            # the pair on screen, measured (and likeness to a reference)
             return self.json(studio.metrics((qs.get("ref") or [""])[0]))
         if path == "/api/studio/epochs":             # the run a LoRA belongs to (the mix's Up to dial)
@@ -3257,6 +3301,7 @@ class Handler(BaseHTTPRequestHandler):
                 key = (os.path.normcase(os.path.abspath(r.get("output_dir") or ".")), (r.get("lora") or "").lower())
                 d = get_family(r.get("family") or "")
                 r["image_loss"] = bool(owners.get(r.get("id")) and d is not None and getattr(d, "loss_watch", False))
+                r["train_maps"] = key not in newest and _maps_has(r.get("output_dir"), r.get("lora"))
                 r["loss_graph"] = key not in newest and os.path.isfile(
                     step_log.loss_path(r.get("output_dir") or "", r.get("lora") or ""))
                 # Continue: the newest run with its name and folder owns its saves (an older one's are overwritten)
@@ -3293,6 +3338,21 @@ class Handler(BaseHTTPRequestHandler):
                               "images": [{**im, "path": pics.get(im["key"], ""), "queued": im["key"] in queued,
                                           "applied": (applied.get(im["key"]) or [{}])[-1].get("epoch")}
                                          for im in res["images"]]})
+        if path == "/api/runs/train_maps":           # one run's training maps (training/train_maps.py), by epoch
+            from fizgig.training import train_maps
+            from fizgig.web import image_loss
+            run = history.get((qs.get("id") or [""])[0])
+            k, t = (qs.get("key") or [None])[0], (qs.get("t") or [None])[0]
+            try:
+                res = train_maps.read(run.get("output_dir"), run.get("lora"), k, t) if run else None
+            except ValueError:
+                return self.json({"error": "bad noise level"}, 400)
+            if res is None:
+                return self.json({"error": "This run has no training maps."}, 404)
+            if k is None:                            # the first ask: the pictures and epochs, no maps yet
+                res["epochs"] = [{"epoch": e["epoch"], "maps": {}} for e in res["epochs"]]
+            return self.json({**res, "live": run.get("result") in ("running", "paused"),
+                              "images": image_loss.image_paths(run, res["keys"])})
         if path == "/api/runs/caption":              # one training image's caption, for the per-image editor
             from fizgig.web import image_loss
             run = history.get((qs.get("id") or [""])[0]) or {}
@@ -3825,6 +3885,13 @@ class Handler(BaseHTTPRequestHandler):
                                 base_file=pref_path(prefs, dit) if dit else "",
                                 checkpoint_path=ckf if ckf and os.path.isfile(ckf) else "",
                                 look_file=bool(lkf and os.path.isfile(lkf)), look_fetch=_look_fetch(desc, vals, lkf))
+                if getattr(desc, "preview_small_card_option", 0):   # Faster, smaller previews: cards under 20 GB
+                    vt = _stats["vram"][1]
+                    if vt and vt / 1e9 >= 20.0 and "FAMILY_PREVIEW_SMALL" not in st["hidden"]:
+                        st["hidden"] = sorted([*st["hidden"], "FAMILY_PREVIEW_SMALL"])
+                    elif (vt and vt / 1e9 < 20.0 and not vals.get("_chosen_FAMILY_PREVIEW_SMALL")
+                          and not vals.get("FAMILY_PREVIEW_SMALL")):
+                        st["force"]["FAMILY_PREVIEW_SMALL"] = True   # on for a card under 20 GB until they choose
                 if st["kind"] in ("standard", "finetune"):     # the Subjects card: what each folder trains as
                     mpn = _multi_person_notes(vals, b.get("image_folder") or "",
                                               multi_person=st["kind"] == "standard" and
@@ -3841,6 +3908,9 @@ class Handler(BaseHTTPRequestHandler):
                     if bn:
                         st["notes"]["BATCH_SIZE"] = bn
                     st["pending"] = st.get("pending") or bpend
+                    if str(vals.get("BATCH_SIZE") or "").strip().lower() == "auto":   # Auto: what it does on this card
+                        st["notes"]["BATCH_SIZE"] = launch.batch_auto_note(
+                            desc, vals.get("DATASET_MEGAPIXELS") or 1.0, _card_total_gb(prefs))
                 if st["kind"] == "finetune" and desc.finetune:      # the fine-tune card's plan line (the desktop's)
                     from fizgig.web import ft_plan
                     st["notes"]["FAMILY_FT_ROTATIONS"], st["pending"] = ft_plan.line(
@@ -4227,11 +4297,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/trigger":
                 set_folder_trigger(str(b.get("folder") or ""), str(b.get("word") or ""))
                 return self.json({"ok": True})
+            if path == "/api/captioners/download":    # one captioner's files now, rather than on first use
+                return self.json(captions.download_captioner(str(b.get("key") or ""), load_prefs()))
             if path == "/api/captions/ai":
                 prefs, folder, clips, photos, _ = _caption_args(b)
                 cap = captioner_for(prefs)
                 model = str(b.get("model") or "")
-                _caption_gpu_check(8.0 if model == captions.QWEN_MODEL else 2.5)
+                _caption_gpu_check(captions.need_gb(model))
                 from fizgig.dataset import detail_crops     # the folder's files, or its largest detail crops
                 inside = {os.path.abspath(f) for f in captions.with_crops(folder)}
                 only = [p for p in (b.get("only") or []) if os.path.dirname(os.path.abspath(p)) in inside]
@@ -4239,7 +4311,8 @@ class Handler(BaseHTTPRequestHandler):
                     prefs, cap if cap and os.path.isfile(cap) else "", folder, model, str(b.get("task") or ""),
                     str(b.get("instruction") or ""), int(b.get("max_tokens") or 120), str(b.get("trigger") or ""),
                     bool(b.get("overwrite")), clips, only=only or None, photos=photos,
-                    ext=captions.caption_ext(b.get("ext"))))
+                    ext=captions.caption_ext(b.get("ext")), threshold=float(b.get("threshold") or 0.35),
+                    leave_out=str(b.get("leave_out") or ""), underscores=bool(b.get("underscores"))))
             if path.startswith("/api/studio/"):
                 try:
                     return self.json(_studio_post(path[len("/api/studio/"):], b))
@@ -4357,6 +4430,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not where:
                     return self.json({"error": "SAM 3.1 isn't here yet: choose SAM 3.1 on this card and press "
                                                "Download first."}, 400)
+                captions.unload()                   # anything on the GPU frees the caption model first
                 try:
                     png = mask_edit.sam_click(str(b.get("folder") or ""), str(b.get("name") or ""),
                                               float(b.get("x") or 0), float(b.get("y") or 0), where)
@@ -4374,6 +4448,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not where:
                     return self.json({"error": "SAM 3.1 isn't here yet: press Download first."}, 400)
                 include, exclude = sammask.split_words(b.get("include")), sammask.split_words(b.get("exclude"))
+                captions.unload()
                 if not include:
                     return self.json({"error": "Type what the masks should show in Mask these (e.g. person)."}, 400)
                 try:
@@ -4406,11 +4481,13 @@ class Handler(BaseHTTPRequestHandler):
                                                          b.get("padding") or 20, bool(b.get("replace")),
                                                          bool(b.get("crops_only"))))
                     if path == "/api/look/scan":
+                        captions.unload()
                         return self.json(prep_jobs.look_scan(folder, b.get("baselines") or []))
                     if path == "/api/masks/edit/save":
                         from fizgig.web import mask_edit
                         return self.json(mask_edit.save(folder, str(b.get("name") or ""), str(b.get("png") or "")))
                     if path == "/api/masks/make":
+                        captions.unload()
                         sam = None
                         if b.get("sam"):
                             from fizgig.dataset import sammask
@@ -4718,7 +4795,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("A training run is using the GPU. Extract can run when it finishes.")
                 tools.run_finetune(str(b.get("base") or "").strip(), str(b.get("tuned") or "").strip(),
                                    str(b.get("out_dir") or "").strip() or default_output_dir(),
-                                   str(b.get("name") or ""), b.get("ranks") or [])
+                                   str(b.get("name") or ""), b.get("ranks") or [], identity=bool(b.get("identity")))
                 return self.json({"ok": True})
             if path == "/api/extract/run":
                 from fizgig.web import tools
@@ -4731,8 +4808,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not name.lower().endswith(".safetensors"):
                     name += ".safetensors"
                 folder = str(b.get("out_dir") or "").strip() or default_output_dir()
+                captions.unload()                   # LoKR / LoHa sources SVD on the GPU
                 out = tools.run(desc, str(b.get("source") or "").strip(), os.path.join(folder, os.path.basename(name)),
-                                int(b.get("rank") or 4), str(b.get("preset") or ""), [str(x) for x in (b.get("blocks") or [])])
+                                int(b.get("rank") or 4), str(b.get("preset") or ""), [str(x) for x in (b.get("blocks") or [])],
+                                identity=bool(b.get("identity")))
                 return self.json({"ok": True, "output": out})
             if path == "/api/metadata/save":         # the header rewritten, every tensor byte as it was
                 from fizgig.utils.st_meta import write_metadata
@@ -4925,6 +5004,11 @@ def run_server(host, port=None, password=None, password_arg=False, open_browser=
             os._exit(0)
 
 
+
+def _maps_has(output_dir, lora):
+    from fizgig.training import train_maps
+    return train_maps.has_maps(output_dir, lora)
+
 _RESTART = [False]
 _SWITCH = [False]
 _SRV = [None]
@@ -5014,6 +5098,7 @@ def main(argv=None):
         from fizgig.web import pod_version
         pod_version.boot()
     user_data.migrate()                       # Fizgig 7's loose files into user_data, before anything reads them
+    _repair_model_links()
     # a pod: its VNC_PASSWORD, the remote desktop's, so one password opens both. Elsewhere VNC_PASSWORD is ignored (a
     # stray one would open the web UI to the network while Preferences says no password).
     saved = str(load_prefs().get("web_password") or "").strip()

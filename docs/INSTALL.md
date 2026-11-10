@@ -8,6 +8,8 @@ Fizgig ships as a ready-made cloud image: the whole app in a browser tab, not a 
 
 > **Before you press Deploy Pod:** RunPod doesn't add a disk for you: on its page press **Add volume**, click **Volume disk** (it opens on Global volume, which doesn't work), keep **300 GB**, press **Add volume disk**, then **Deploy Pod** ([see an explanation with screenshots](../docker/README.md#give-it-a-disk-on-runpods-deploy-page)).
 
+<a href="https://console.runpod.io/deploy?type=GPU&gpu=RTX+5090&count=1&template=bdrdew7hxw&ref=vkb387ep"><img src="https://img.shields.io/badge/New%20to%20RunPod%3F-Sign%20up%20with%20Google%20to%20support%20Fizgig-4285F4?style=flat&logo=google&logoColor=white" alt="New to RunPod? Sign up with Google to support Fizgig"></a>
+
 **[⚡ Deploy on RunPod →](https://console.runpod.io/deploy?type=GPU&gpu=RTX+5090&count=1&template=bdrdew7hxw&ref=vkb387ep)**  ·  [Read the guide first](../docker/README.md)  ·  Need the old pod? [Fizgig Classic v7.x](https://console.runpod.io/deploy?type=GPU&gpu=RTX+5090&count=1&template=faoq8ed6um&ref=vkb387ep)
 
 ## Requirements
@@ -16,7 +18,7 @@ Fizgig ships as a ready-made cloud image: the whole app in a browser tab, not a 
 - **NVIDIA driver** — 555+ on Windows, 550+ on Linux (CUDA 12.8 wheels).
 - **AMD ROCm** — **Windows:** `install_fizgig_rocm.bat` (supported path; launcher and installer improvements by [@scryptio](https://github.com/scryptio)). **Linux:** `./install_fizgig_rocm.sh`, **highly experimental**: newer gfx such as RDNA4, a desktop compositor sharing the training GPU, and driver resets are common. Use Windows ROCm or NVIDIA Linux for production training. Optional system `amdrocm-amdsmi` gives accurate status-bar VRAM via `amd-smi`.
 - **OS** — Windows 10 / 11 or Linux. macOS handles captioning and image prep; training needs CUDA or ROCm.
-- **Python** — 3.10 – 3.13.
+- **Python** — 3.11 – 3.13 (PyTorch 2.15 has no Python 3.10 build).
 - **System RAM** — 32 GB recommended; see [System RAM](#system-ram).
 - **Disk** — ~10 GB for the venv, plus ~40 GB for model files.
 - **Full fine-tuning** (experimental, every model; Flux 3 Image Klein, Krea 2 and MiniMax H3 in the guides) — see [Full fine-tuning](#full-fine-tuning).
@@ -140,7 +142,7 @@ NVIDIA uses `pynvml` / `nvidia-smi`; the AMD readers (`vram_monitor.read_amd_gpu
 
 ### Helper models
 
-Three small models download on first use: InsightFace `buffalo_l` (~300 MB, during install), Florence-2 (~500 MB–1.5 GB, first AI caption), and Helsinki-NLP `opus-mt-en-zh` (~300 MB, first bilingual translation). If you use the furry / anime face backends, two more download on first use: the deepghs anime head model (~40 MB) and DINOv2-base (~350 MB). See [face backends](FACE_BACKENDS.md).
+Three small models download on first use: InsightFace `buffalo_l` (~300 MB, during install), Florence-2 (~500 MB–1.5 GB, first AI caption), the WD EVA02 tagger (1.3 GB, first booru tagging), JoyCaption Beta One (16 GB, first used), and Helsinki-NLP `opus-mt-en-zh` (~300 MB, first bilingual translation). If you use the furry / anime face backends, two more download on first use: the deepghs anime head model (~40 MB) and DINOv2-base (~350 MB). See [face backends](FACE_BACKENDS.md).
 
 ## Model downloads
 

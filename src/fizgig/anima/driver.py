@@ -20,7 +20,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from fizgig.families.driver import FamilyDriver, prior_base, weighted_loss, with_prior
+from fizgig.families.driver import FamilyDriver, picture_losses, prior_base, weighted_loss, with_prior
 
 DTYPE = torch.bfloat16
 HELPER = "circlestone-labs/Anima-Base-v1.0-Diffusers"   # tokenizers + the Qwen3 config (helper_files)
@@ -216,10 +216,9 @@ class AnimaDriver(FamilyDriver):
         mask = torch.zeros(xt.shape[0], 1, xt.shape[-2], xt.shape[-1], device=xt.device, dtype=DTYPE)
         pred = dit.forward_mini_train_dit(xt.to(DTYPE), t.to(xt.device, DTYPE)[:, None], ctx,
                                           padding_mask=mask).float()
-        if loss_mask is None:
-            return F.mse_loss(pred, noise - x0), {"t": float(t.mean())}
-        mw = loss_mask.float().to(x0.device).flatten(1)
-        return weighted_loss((pred - (noise - x0)).pow(2).mean(dim=1).flatten(1), mw), {"t": float(t.mean())}
+        mw = None if loss_mask is None else loss_mask.float().to(x0.device).flatten(1)
+        per = picture_losses((pred - (noise - x0)).pow(2).mean(dim=1).flatten(1), mw)
+        return per.mean(), {"t": float(t.mean()), "per": per, "ts": [float(v) for v in t]}
 
     def noise_latents(self, latents, generator, *, min_t=0.0, max_t=1.0):
         x0 = latents.float()
@@ -230,6 +229,25 @@ class AnimaDriver(FamilyDriver):
         noise = torch.randn(x0.shape, generator=generator).to(x0.device)
         tb = t.view(-1, 1, 1, 1, 1)
         return {"xt": (1 - tb) * x0 + tb * noise, "t": t}
+
+    def map_target(self, latents, state):
+        """The target at this state (training maps): noise - x0, with the frame axis noise_latents adds."""
+        x0 = latents.float()
+        x0 = x0.unsqueeze(2) if x0.dim() == 4 else x0
+        return (state["xt"].float() - x0.to(state["xt"].device)) / state["t"].float().view(-1, 1, 1, 1, 1)
+
+    def trigger_tokenizer(self):
+        """The DiT's text keys are the LLM adapter's T5 tokens of the raw caption, one for one."""
+        if getattr(self, "_t5_fast", None) is None:
+            from transformers import PreTrainedTokenizerFast
+            from fizgig.utils import hf_public
+            self._t5_fast = PreTrainedTokenizerFast(
+                tokenizer_file=hf_public.download(repo_id=HELPER, filename="t5_tokenizer/tokenizer.json"),
+                eos_token="</s>", pad_token="<pad>", unk_token="<unk>")
+        return self._t5_fast
+
+    def trigger_text(self, tokenizer, caption):
+        return caption, ""                       # the caption as it is: no template
 
     def predict(self, dit, state, cond):
         return self._velocity(dit, state["xt"], state["t"], cond)

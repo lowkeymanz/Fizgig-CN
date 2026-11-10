@@ -10,7 +10,10 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.utils.checkpoint import checkpoint
+
+from fizgig.training import attn_probe
 
 IMG_TOKENS_PER_SLOT = 4          # each vision-language image slot stands for a 2x2 group of latent tokens
 
@@ -162,6 +165,12 @@ def prefix_segments(image_ids: torch.Tensor, prefix_len: int) -> list:
     return segs
 
 
+# A masked attention (a training batch's padded captions, an edit's segments): PyTorch's default choice falls back to
+# its memory-efficient kernel with a mask, and cuDNN takes one at almost no cost (#221, measured on MOSS-Image, the same
+# padded-caption batch). A preference: anything cuDNN can't take falls back down the list.
+_MASKED_BACKENDS = [SDPBackend.CUDNN_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+
+
 def _sdpa(q, k, v, mask=None):
     """q/k/v in [B, S, H, D] (diffusers layout); SDPA wants [B, H, S, D]; bool mask True = attend. An opted-in
     workbench render takes comfy-kitchen's INT8 kernel where no mask excludes a token (fizgig/modules/int8_attention)."""
@@ -169,7 +178,11 @@ def _sdpa(q, k, v, mask=None):
     qt, kt, vt = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
     out = _i8a.attend(qt, kt, vt, mask)
     if out is None:
-        out = F.scaled_dot_product_attention(qt, kt, vt, attn_mask=mask)
+        if mask is not None:
+            with sdpa_kernel(_MASKED_BACKENDS, set_priority=True):
+                out = F.scaled_dot_product_attention(qt, kt, vt, attn_mask=mask)
+        else:
+            out = F.scaled_dot_product_attention(qt, kt, vt, attn_mask=mask)
     return out.transpose(1, 2)
 
 
@@ -197,6 +210,9 @@ class Attention(nn.Module):
         # Block-causal prefill (QwenImage21AttnProcessor): each prefix segment attends to keys [0, end); text segments
         # add a causal triangle over their own keys; the target image attends to everything. Padded keys dropped.
         prefix_len = segments[-1][1] if segments else 0
+        if attn_probe._ACTIVE is not None:      # training maps: the trigger word's attention (training/attn_probe.py)
+            attn_probe.layout((prefix_len, q.shape[1]), 0, q.shape[1])
+            attn_probe.see(q.transpose(1, 2), k.transpose(1, 2), key_valid)
         outs = []
         for start, end, is_text in segments:
             m = None

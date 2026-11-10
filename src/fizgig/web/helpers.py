@@ -4186,7 +4186,8 @@ def move_in(body):
                 return {"models": wait}
             paths[stage] = got
     try:
-        turbo = float(str(v.get("FAMILY_TURBO_STRENGTH") or 0).strip() or 0)
+        from fizgig.families.form import turbo_ticked_off
+        turbo = 0.0 if turbo_ticked_off(desc, v) else float(str(v.get("FAMILY_TURBO_STRENGTH") or 0).strip() or 0)
     except ValueError:
         turbo = 0.0
     m = models(desc.key, {"conds": "text" in paths, "turbo": turbo, "look": 1 if v.get("FAMILY_PREVIEW_LOOK") else 0},
@@ -4253,6 +4254,14 @@ def move_in(body):
         rec["batch"] = batch_plan.fit(desc, v, s.gpu_env(dict(os.environ, PYTHONPATH=os.path.join(s.BASE_DIR, "src")),
                                                          prefs),
                                       files=batch_plan.models(desc, lambda k: sent.get(k) or s.pref_path(prefs, k)))
+        if rec["batch"] > 1 and desc.batch_auto:
+            # a model with a measured fastest batch (Batch size Auto's) takes that, not the largest that fits: past it
+            # a picture trains no faster and the memory is better spent going without checkpointing
+            try:
+                mp = float(v.get("DATASET_MEGAPIXELS") or 1.0)
+            except (TypeError, ValueError):
+                mp = 1.0
+            rec["batch"] = min(rec["batch"], max(1, desc.auto_batch(mp)))
         if rec["batch"] > 1:
             v["BATCH_SIZE"] = str(rec["batch"])
     over = {}

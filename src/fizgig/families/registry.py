@@ -15,10 +15,22 @@ from fizgig.families.acestep import ACESTEP15
 from fizgig.families.flux3 import FLUX3
 from fizgig.families.moss_image import MOSS_IMAGE
 from fizgig.families.fibo2 import FIBO2
+from fizgig.families.vimoo import VIMOO
 
-FAMILIES = {d.key: d for d in (KLEIN, MINIMAX, KREA2, QWEN_IMAGE_21, SDXL, ANIMA, ZIMAGE, ZIMAGE_BASE, ACESTEP15, FLUX3, MOSS_IMAGE, FIBO2)}
+FAMILIES = {d.key: d for d in (KLEIN, MINIMAX, KREA2, QWEN_IMAGE_21, SDXL, ANIMA, ZIMAGE, ZIMAGE_BASE, ACESTEP15, FLUX3, MOSS_IMAGE, FIBO2, VIMOO)}
+
+def _ft_presets_on_adafactor(d):
+    """A built-in Fine-tune preset trains with Adafactor (#312): the family's LoRA presets are on Muon, a LoRA
+    optimizer a fine-tune can't use."""
+    if not d.presets:
+        return
+    fixed = tuple((n, ({**v, "OPTIMIZER_TYPE": "adafactor", "OPTIMIZER_ARGS": ""} if v.get("FAMILY_FT") else v))
+                  for n, v in d.presets)
+    object.__setattr__(d, "presets", fixed)
+
 
 for _d in FAMILIES.values():
+    _ft_presets_on_adafactor(_d)
     _problems = _d.validate()
     if _problems:
         raise ValueError(f"family description {_d.key!r} is inconsistent: {'; '.join(_problems)}")

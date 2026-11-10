@@ -51,6 +51,18 @@ def weighted_loss(se, *weights):
     return (se * w).mean()
 
 
+def picture_losses(se, *weights):
+    """Batch Size above 1: each picture's weighted_loss, `se`'s first dim being the pictures -> (B,). Their mean is
+    weighted_loss over the batch (each picture's weights scaled to mean 1 on its own)."""
+    ws = [w for w in weights if w is not None]
+    if ws:
+        w = ws[0].to(se.device, se.dtype)
+        for x in ws[1:]:
+            w = w * x.to(se.device, se.dtype)
+        se = se * (w / w.mean(dim=tuple(range(1, w.dim())), keepdim=True).clamp_min(1e-8))
+    return se.reshape(se.shape[0], -1).mean(dim=1)
+
+
 def prior_base(prior, loss_mask, forward):
     """Masked prior preservation: the model's own prediction at this step's noised input with the LoRA at 0
     (prior.base runs `forward` that way), or None - no prior asked for, or a picture without a mask. Taken BEFORE the
@@ -249,7 +261,9 @@ class FamilyDriver:
         """Batch Size above 1 (description batch_training): latents (B, C, h, w) of one bucket, cond = the B pictures'
         batch_cond dicts joined by stack_conds, loss_mask (B, 1, h, w) or None. Each picture draws its noise and
         timestep in the order B training_loss calls would, so with the same generator the loss is the mean of
-        theirs. Returns (loss tensor, info dict with "t", the pictures' mean)."""
+        theirs. Returns (loss tensor, info dict with "t", the pictures' mean; "per", each picture's own loss (B,) as
+        its training_loss would give it (picture_losses), and "ts", each picture's t) - the per-image loss watch
+        weighs and records the pictures one by one from them."""
         raise NotImplementedError
 
     def stack_conds(self, conds: list):
@@ -298,6 +312,44 @@ class FamilyDriver:
     def predict(self, dit, state: dict, cond: dict):
         """The model's prediction at a noise_latents() state for this conditioning (batched dict)."""
         raise NotImplementedError
+
+    def map_target(self, latents, state: dict):
+        """What predict() should return at this noise_latents() state - the training target, for the training maps'
+        per-pixel error. Default: flow matching (x_t = (1 - t) x0 + t noise, target noise - x0), recovered from the
+        state as (x_t - x0) / t. A family with another target overrides it."""
+        import torch
+        t = state["t"]
+        t = t.float().view(-1, *([1] * (latents.dim() - 1))).to(latents.device) if torch.is_tensor(t) else float(t)
+        return (state["xt"].float() - latents.float()) / t
+
+    def trigger_text(self, tokenizer, caption: str):
+        """For the trigger-word attention map (description.trigger_attention): (the prompt exactly as this family's
+        text encoder builds it around the caption, the leading part of it the encoder drops before the DiT sees the
+        text). The tokenizer is trigger_tokenizer()'s. None: no trigger map."""
+        return None
+
+    def trigger_tokenizer(self):
+        """The tokenizer whose pieces are the DiT's text keys, in its fast form (character offsets). Default: the
+        family's caption tokenizer (families/trigger_check)."""
+        from fizgig.families import trigger_check
+        return trigger_check.fast_tokenizer(self.description.key)
+
+    def trigger_key_positions(self, caption: str, word: str):
+        """The word's positions among the DiT's text keys (from where the text starts), [] when the caption doesn't
+        have it, None when the family has no trigger map. Default: trigger_text() through trigger_tokenizer(); a
+        family whose keys aren't its tokens one for one (SDXL's 77-token chunks) overrides it."""
+        tok = self.trigger_tokenizer()
+        built = self.trigger_text(tok, caption)
+        if built is None:
+            return None
+        from fizgig.training.attn_probe import trigger_positions
+        return trigger_positions(tok, built[0], built[1], caption, word)
+
+    def trigger_attention_hooks(self, dit):
+        """A context manager put around the trigger-word map's forward, for a model that needs hooks installed to
+        reach its attention (SDXL's diffusers UNet: its cross-attention processors). Default: nothing."""
+        import contextlib
+        return contextlib.nullcontext()
 
     # ---- sampling -------------------------------------------------------------------------------
     def initial_noise(self, seed: int, width: int, height: int):
@@ -415,6 +467,14 @@ class FamilyDriver:
         """Why `path` cannot be fine-tuned by this family, or None. Default: the shared rule (a bf16 file)."""
         from fizgig.families.ft import source_unfit_reason
         return source_unfit_reason(path)
+
+    def ft_load_mp(self, group):
+        """Megapixels the fine-tune plans its activations at: the run's largest bucket. A video family whose clips
+        cost by their token load (frames x area) returns that instead."""
+        try:
+            return max(k[-2] * k[-1] / 1e6 for ds in group.datasets for k in ds.batch_manager.bucket_resos)
+        except Exception:
+            return None
 
     def install_ft_streamer(self, dit, streamer) -> None:
         """Hand the fine-tune's block streamer to the model: it implements the block-swap interface the forward

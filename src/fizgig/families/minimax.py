@@ -23,7 +23,8 @@ _STRUCTURE = (
 
 def _preset(rank, epochs, clip_still=True, slider=False, lr=1e-6, optimizer="automagic3"):
     """The old H3 built-ins (lora_trainer_gui.py MINIMAX_BUILT_IN_PRESETS), values unchanged, in the standard layer's
-    keys and this family's option keys; slider=True the Slider preset (adamw8bit, as every slider trains)."""
+    keys and this family's option keys; slider=True the Slider preset (AdamW: full-precision state measured clearly
+    better than AdamW8bit on H3 LoRAs; a rank-8 slider's state is tens of MB, 6 Nov 2026)."""
     return {
         "NETWORK_DIM": rank, "NETWORK_ALPHA": rank, "NETWORK_TYPE": "LoRA (standard)", "LOKR_FACTOR": 8,
         "LEARNING_RATE": lr, "MAX_TRAIN_EPOCHS": epochs, "SAVE_EVERY_N_EPOCHS": 1, "SEED": 42,
@@ -47,7 +48,7 @@ PRESETS = (
     # Slider (3 Oct): rank 8 (Peter) at 2e-4 for ~160 steps; a prompt smile slider at push 2
     # was clear by epoch 5 of 10 (16 practice pictures an epoch)
     ("✨ MiniMax H3 Slider (rank 8, 2e-4)", _preset(8, 16, clip_still=False, slider=True, lr=2e-4,
-                                                     optimizer="adamw8bit")),
+                                                     optimizer="adamw")),
 )
 
 OPTIONS = (
@@ -317,13 +318,27 @@ MINIMAX = FamilyDescription(
     detail_crops=False,                      # clips: a crop of a frame isn't a clip
     multi_concept_hint="See the MiniMax section of the README.",
     int8_attention=True,              # workbench renders: comfy-kitchen's INT8 attention
-    activation_cache=True,            # Turbo Preview: step-1 replay, identical to a full render
+    activation_cache=True,            # Reuse unchanged blocks: step-1 replay, identical to a full render
     adaptive_lr=False,
+    not_offered={
+        "adaptive_lr": "retired for H3 by decision (its LR is set by the adapter ramp)",
+        "loss_watch": "off for H3 by decision (CLAUDE.md, Per-Image Loss Watch)",
+        "training_maps": "clips: the maps draw on a still's latent grid (a clip's frames would need their own view)",
+        "caption_dropout": "H3 has its own caption dropout option (H3_CAPTION_DROPOUT), not the shared row",
+        "detail_crops": "a crop of a clip's frame isn't a clip",
+        "resolution_stages": "clips train at their own size: not measured with stages",
+    },
     slider_training=True,             # prompt pairs, photo pairs and clip pairs (driver: _slider_loss / predict)
     loss_watch=False,
+    training_maps=False,
     batch_training=True,              # Batch size (Other Options): pictures packed (forward_packed); clips one a step
     own_plan=True,                    # the old trainer's planner (driver.plan_run): its own figures, not train_memory
     batch_gb=(0.2, 0.8),              # GB each extra picture takes: fixed, per MP (batch 2 vs 3: batch 1 runs without checkpointing)
+    # Batch x checkpointing sweep, 6 Nov 2026 (RTX PRO 6000, 8 pictures, 2 epochs, uncompiled, previews off - so the
+    # no-checkpointing peaks below are the larger of that run's and train_memory's preview peak; uncompiled sits
+    # above a compiled run, the safe side). Desktop\Fizgig batch tests\bsgc\MORNING_REPORT.md
+    batch_auto=((0.25, 4), (1.0, 4)),          # 2.7x / 1.8x a picture over batch 1 (pictures; clips stay 1)
+    batch_gb_nogc=((0.25, 2.4), (1.0, 5.9)),
     masked_training=True,             # photos only: the dataset gives a mask to a still, never to a clip or a voice
     network_hint="LoRA recommended for MiniMax",
     ema_hint="A smoothed average of the weights, leading to better and more reliable previews.",

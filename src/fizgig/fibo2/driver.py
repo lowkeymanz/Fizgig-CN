@@ -23,7 +23,7 @@ import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file
 
-from fizgig.families.driver import Block, BlockGroup, FamilyDriver, prior_base, weighted_loss, with_prior
+from fizgig.families.driver import Block, BlockGroup, FamilyDriver, picture_losses, prior_base, weighted_loss, with_prior
 
 logger = logging.getLogger(__name__)
 
@@ -439,6 +439,11 @@ class Fibo2Driver(FamilyDriver):
             out.append(self._encode(te, edit_prompt(text, len(pics)), pics))
         return out
 
+    def trigger_text(self, tokenizer, caption):
+        """The pipeline's prompt template; its injection blocks' keys are these tokens, nothing dropped."""
+        from fizgig.fibo2.model import PROMPT_TEMPLATE
+        return PROMPT_TEMPLATE.replace("{}", caption, 1), ""
+
     def predict(self, dit, state, cond):
         """The velocity as a tensor (the trainer's loss paths take it apart as one). The cached latents and the text
         bundles are fp32 on the CPU; they go to the model's device and compute dtype (the first parameter that is
@@ -546,6 +551,10 @@ class Fibo2Driver(FamilyDriver):
                         f"Z mean {cached[1]:.2f} (the model's own centre is 0.5 to 1.15 by token count)")
         return cached[1]
 
+    def map_target(self, latents, state):
+        """The target at this state (training maps): noise - x0 (state keeps its noise)."""
+        return (state["noise"].float() - self._as4(latents).float().to(state["noise"].device))
+
     def noise_latents(self, latents, generator, *, min_t=0.0, max_t=1.0):
         latents = self._as4(latents)
         t = self._sample_sigma(generator, latents)
@@ -586,9 +595,11 @@ class Fibo2Driver(FamilyDriver):
         return loss, {"t": state["t"]}
 
     def stack_conds(self, conds):
-        """Captions of different lengths pad to the longest with the mask off: the DiT reads each prompt's length
-        from its mask (its gist count, its cross-attention), as the pipeline batches prompts."""
+        """Captions of different lengths pad to the longest, rounded up to a multiple of 16 (few shapes for cuDNN's
+        attention plans, #221), with the mask off: the DiT reads each prompt's length from its mask (its gist count,
+        its cross-attention), as the pipeline batches prompts."""
         n = max(c["tokens"].shape[-2] for c in conds)
+        n += -n % 16
         tokens = [F.pad(c["tokens"], (0, 0, 0, n - c["tokens"].shape[-2])) for c in conds]
         masks = [F.pad(c["mask"].bool(), (0, n - c["mask"].shape[-1])) for c in conds]
         return {"tokens": torch.cat(tokens), "mask": torch.cat(masks)}
@@ -602,12 +613,11 @@ class Fibo2Driver(FamilyDriver):
         state = {k: torch.cat([s[k] for s in states]) for k in ("hidden_states", "timestep", "noise")}
         pred = self.predict(dit, state, cond).float()
         target = (state["noise"] - latents).float()
-        if loss_mask is None:
-            loss = F.mse_loss(pred, target)
-        else:
-            mw = loss_mask.float().to(latents.device).reshape(latents.shape[0], *latents.shape[-2:])
-            loss = weighted_loss((pred - target).pow(2).mean(dim=1), mw)
-        return loss, {"t": sum(s["t"] for s in states) / len(states)}
+        mw = None if loss_mask is None else \
+            loss_mask.float().to(latents.device).reshape(latents.shape[0], *latents.shape[-2:])
+        per = picture_losses((pred - target).pow(2).mean(dim=1), mw)
+        return per.mean(), {"t": sum(s["t"] for s in states) / len(states), "per": per,
+                            "ts": [float(s["t"]) for s in states]}
 
     @torch.no_grad()
     def initial_noise(self, seed, width, height):

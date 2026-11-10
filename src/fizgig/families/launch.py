@@ -329,8 +329,8 @@ def start_checks(desc, st, image_folder):
         if lack:
             out.append(f"{len(lack)} detail crop caption{'s' if len(lack) != 1 else ''} in {rel} don't contain the "
                        f"trigger word '{trig}': those crops train without it.")
-    if (not st.get("ADAPTIVE_LR") and "automagic" not in _s(st.get("OPTIMIZER_TYPE")).lower()
-            and not (prodigy(st) and not ft_on(desc, st))):           # Prodigy's 1.0 is a multiplier
+    if (not st.get("ADAPTIVE_LR") and (ft_on(desc, st) or not (automagic(st) or prodigy(st)))):
+        # Automagic sets its own rate, Prodigy's 1.0 is a multiplier; a fine-tune trains at the box's rate
         kind = "finetune" if ft_on(desc, st) else "slider" if slider_on(desc, st) else "lora"
         band = next(((lo, hi) for k, lo, hi in (desc.start_lr_bands or ()) if k == kind), None)
         try:
@@ -417,11 +417,12 @@ def pair_problems(after_dir, before_dir, caption_ext=".txt", exts=PAIR_EXTS):
     return uncaptioned, shapes
 
 
-def edit_instruction(inputs):
-    """The edit instruction for previews: the typed instruction, else the first edited photo's caption file."""
-    text = _s(inputs.get("edit_caption"))
-    if text:
-        return text
+def edit_instructions(inputs):
+    """The edit instructions for previews, one per line of the Edit instruction box (each renders on the test
+    photo), else the first edited photo's caption file."""
+    lines = [ln.strip() for ln in str(inputs.get("edit_caption") or "").splitlines() if ln.strip()]
+    if lines:
+        return lines
     folder = _s(inputs.get("image_folder"))
     ext = inputs.get("caption_ext") or ".txt"
     try:
@@ -432,10 +433,10 @@ def edit_instruction(inputs):
                 with open(cap, encoding="utf-8") as fh:
                     line = fh.read().strip().splitlines()
                 if line and line[0].strip():
-                    return line[0].strip()
+                    return [line[0].strip()]
     except OSError:
         pass
-    return ""
+    return []
 
 
 # the Training tab's window-size choice -> the planner's cap on parts per window (0 = as many as fit)
@@ -915,6 +916,8 @@ def train_command(desc, inputs, plan):
             cmd += ["--compile_blocks", cb]
     if st.get("keep_checkpointing"):
         cmd += ["--gradient_checkpointing", "on"]
+    if batch_auto(desc, st):
+        cmd += ["--batch_size_auto"]
     try:
         if int(float(str(st.get("GRADIENT_ACCUMULATION", "") or 1))) > 1:
             cmd += ["--gradient_accumulation_steps", str(int(float(st["GRADIENT_ACCUMULATION"])))]
@@ -942,8 +945,10 @@ def train_command(desc, inputs, plan):
         if cont.get("checkpoint"):
             cmd += ["--ft_start_window", str(int(cont.get("start_window", 0))),
                     "--ft_epochs_done", str(int(cont.get("epochs_done", 0)))]
-    # per-image loss watch (families/loss_watch.py), batch size 1 only
-    bs1 = batch_size(desc, st) <= 1
+    if st.get("TRAINING_MAPS") and desc.training_maps:     # training/train_maps.py: the Samples tab's Training maps
+        cmd += ["--training_maps"]
+    # per-image loss watch (families/loss_watch.py): at any Batch size, a batch's pictures weighed and recorded
+    # one by one
     lw = (st.get("loss_watch") or {}) if desc.loss_watch else {}
     if multi_person_on(desc, st):    # the side-by-sides are hard on purpose: no verdicts, per-image LR or look warm-up
         lw = {**lw, "detect": False, "per_image_lr": False, "warmup": False}
@@ -953,7 +958,7 @@ def train_command(desc, inputs, plan):
     can_recaption = can_recaption and not multi_person_on(desc, st)
     if can_recaption:
         watch.append(("recaption", "--auto_recaption"))
-    if bs1:
+    if lw:
         cmd += [flag for key, flag in watch if lw.get(key)]
         if can_recaption and lw.get("recaption"):
             cmd += ["--captioner", st.get("captioner", "")]
@@ -970,8 +975,6 @@ def train_command(desc, inputs, plan):
                                                       ("--recaption_instruction_detailed", "--recaption_task_detailed"))):
                 label, instr, edited = recaption_instruction(key, ovr, st.get("caption_concept") or "")
                 cmd += [flag, instr, task_flag, f'"{label}"' + (" (your edit)" if edited else " (as shipped)")]
-    elif any(lw.get(key) for key, _ in watch):
-        plan.console.append("[loss-watch] per-image features skipped - they need Batch Size 1.\n")
     if any(lw.get(key) for key, _ in watch) and "--text_encoder" not in cmd:
         cmd += ["--text_encoder", _model(st, desc, "text_encoder")]   # caption repair re-encodes
     if ("lokr" in desc.network_types and str(st.get("NETWORK_TYPE", "")).startswith("LoKR")
@@ -984,9 +987,14 @@ def train_command(desc, inputs, plan):
         ema = str(st.get("FAMILY_EMA", "") or desc.ema_default).split(" ")[0]
         if ema != "Off":
             cmd += ["--ema_decay", ema]
-    if str(st.get("OPTIMIZER_TYPE", "") or "").strip():
+    if ft_on(desc, st):                    # a fine-tune: its optimizer or Adafactor (optimizers.ft_optimizer, #312)
+        from fizgig.training.optimizers import ft_optimizer
+        cmd += ["--optimizer_type", ft_optimizer(st.get("OPTIMIZER_TYPE"))]
+    elif str(st.get("OPTIMIZER_TYPE", "") or "").strip():
         cmd += ["--optimizer_type", str(st["OPTIMIZER_TYPE"]).strip()]
-    if str(st.get("OPTIMIZER_ARGS", "") or "").strip():
+    if ft_on(desc, st):                    # its optimizers take no args here
+        pass
+    elif str(st.get("OPTIMIZER_ARGS", "") or "").strip():
         cmd += ["--optimizer_args", str(st["OPTIMIZER_ARGS"]).strip()]
     for key, flag in (("METADATA_TITLE", "--metadata_title"), ("METADATA_AUTHOR", "--metadata_author"),
                       ("METADATA_DESCRIPTION", "--metadata_description"),
@@ -1076,11 +1084,11 @@ def _preview_flags(desc, st, plan, cmd):
     samples_dir = st.get("samples_dir") or os.path.join(_s(st.get("LORA_OUTPUT_DIR")), "sample")
     prompts = None
     if edit_on(desc, st):              # edit previews: the edit instruction, not the Samples-tab prompts
-        instr = edit_instruction(st)
+        instr = edit_instructions(st)
         if instr:
             prompts = os.path.join(samples_dir, f"{desc.key}_edit_prompt.txt")
             plan.dirs.append(samples_dir)
-            plan.files.append((prompts, instr + "\n"))
+            plan.files.append((prompts, "\n".join(instr) + "\n"))
     elif slider_on(desc, st):          # slider previews: the dial on its own picture, not the Samples tab
         own = (st.get("FAMILY_SLIDER_BASE") if slider_on(desc, st, "prompts")
                else st.get("FAMILY_SLIDER_CAPTION"))
@@ -1125,6 +1133,8 @@ def _preview_flags(desc, st, plan, cmd):
                 "--sample_height", str(sm.get("height") or "").strip() or str(desc.preview_height)]
         if turbo_steps and turbo_steps.isdigit():
             out += ["--sample_steps", turbo_steps]
+        if st.get("FAMILY_PREVIEW_SMALL") and getattr(desc, "preview_small_card_option", 0):
+            out += ["--preview_small_card_cap", str(desc.preview_small_card_option)]   # the trainer applies it <20 GB
         elif str(sm.get("steps") or "").strip():
             out += ["--sample_steps", str(sm["steps"]).strip()]
         try:
@@ -1232,6 +1242,41 @@ STAGE_BLEND = 0.1      # the share of the run the change from the smaller size t
 
 
 BATCH_SIZES = ("1", "2", "3", "4", "6", "8")
+BATCH_AUTO = "Auto"
+
+
+def batch_choices(desc):
+    """The Batch size row's choices: Auto (after 1) for a family with a measured sweet spot (description batch_auto)."""
+    return (BATCH_SIZES[0], BATCH_AUTO) + BATCH_SIZES[1:] if desc.batch_auto else BATCH_SIZES
+
+
+def batch_auto(desc, inputs):
+    """Batch size Auto: the trainer picks the family's measured fastest batch on a 40 GB+ card (--batch_size_auto); the
+    dataset config says 1 (batch_size() reads Auto as 1) and the trainer raises it before the dataset is built."""
+    if str(_s(inputs.get("BATCH_SIZE")) or "").strip().lower() != "auto" or not (desc.batch_training and desc.batch_auto):
+        return False
+    return not (edit_on(desc, inputs) or slider_on(desc, inputs) or dop_on(desc, inputs)
+                or multi_person_on(desc, inputs))
+
+
+BATCH_AUTO_MIN_CARD_GB = 38.0   # quant.NOGC_MIN_CARD_GB (a 40 GB card reports ~39.4 GiB), without importing torch here
+
+
+def batch_auto_note(desc, megapixels, card_gb=None):
+    """What Auto picks at this size, for the row's note - on this card when its size is known (card_gb, GiB)."""
+    try:
+        mp = float(megapixels)
+        n = desc.auto_batch(mp)
+    except (TypeError, ValueError):
+        return ""
+    if n <= 1:
+        return f"Auto: 1 at {mp:g} MP - {desc.display_name} measured fastest a picture at a time there."
+    if card_gb and card_gb < BATCH_AUTO_MIN_CARD_GB:
+        return (f"Auto: 1 picture a step on this {card_gb:.0f} GB card. Auto batches on 40 GB+ cards, where "
+                f"{n} at {mp:g} MP measured fastest for {desc.display_name}.")
+    where = f"this {card_gb:.0f} GB card" if card_gb else "a 40 GB+ card"
+    return (f"Auto: {n} pictures a step at {mp:g} MP on {where} - the fastest measured for {desc.display_name}. "
+            f"1 when a setting reads one picture a step.")
 
 
 
@@ -1257,7 +1302,7 @@ def train_side(mp):
 
 def batch_size(desc, inputs):
     """Pictures a step (Other Options' Batch size): 1 unless the family trains batches (description batch_training)
-    and the run is a plain LoRA - an edit, a slider, a fine-tune, DOP and Fizgig LoRA Isolation read one picture a
+    and the run is a LoRA or a fine-tune - an edit, a slider, DOP and Fizgig LoRA Isolation read one picture a
     step."""
     try:
         n = int(str(_s(inputs.get("BATCH_SIZE")) or 1).strip())
@@ -1265,7 +1310,7 @@ def batch_size(desc, inputs):
         return 1
     if n <= 1 or not desc.batch_training:
         return 1
-    if edit_on(desc, inputs) or slider_on(desc, inputs) or ft_on(desc, inputs) or dop_on(desc, inputs) \
+    if edit_on(desc, inputs) or slider_on(desc, inputs) or dop_on(desc, inputs) \
             or multi_person_on(desc, inputs):
         return 1
     return n
@@ -1360,10 +1405,14 @@ def dataset_toml(desc, inputs, cache_suffix=""):
         _fuse(f)
         if root:
             lines.append(f'cache_directory = "{(cache_dir_for(root, f) + cache_suffix).replace(chr(92), "/")}"')
+    _subj = [_s(inputs.get("image_folder"))] + extra
     for f, (_s_, w) in mp.items():        # multi-person mode: each person's composites, already captioned fused
         if _s_["kind"] != "person":
             continue
-        lines += ["", "[[datasets]]", f'image_directory = "{w.replace(chr(92), "/")}"']
+        # keyed mp<n>: by subject - every subject's composites share file names (fizgig_mp_00..), so without it two
+        # subjects' pictures were one key, and nothing could find them (they live in the cache, not a training folder)
+        n = next((i + 1 for i, g in enumerate(_subj) if g == f), 1)
+        lines += ["", "[[datasets]]", f'image_directory = "{w.replace(chr(92), "/")}"', f'item_prefix = "mp{n}:"']
         if root:
             lines.append(f'cache_directory = "{(cache_dir_for(root, w) + cache_suffix).replace(chr(92), "/")}"')
     reg = ft_reg_dir(desc, inputs)

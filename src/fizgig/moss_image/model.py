@@ -2,7 +2,7 @@
 # weights, md5 ba68f9308b1d9ad9bb90ae9755b2e3b7, 16 Oct 2026). Copyright 2026 OpenMOSS. Licensed under the Apache
 # License, Version 2.0 (LICENSE beside this file).
 # Changes for Fizgig: plain torch modules (no diffusers mixins), the forward split so the shared block offloader,
-# gradient checkpointing, torch.compile and Turbo Preview wrap the 42 blocks, attention through Fizgig's INT8 hook
+# gradient checkpointing, torch.compile and Reuse unchanged blocks wrap the 42 blocks, attention through Fizgig's INT8 hook
 # (fizgig/modules/int8_attention) before torch SDPA, and a loader for the ComfyUI single file (fused q/k/v), the
 # diffusers shards and ComfyUI's int8 ConvRot repack. The maths of every module is the reference's, line for line.
 """MOSS-Image DiT: 5B single-stream transformer, 42 blocks at width 3072 (24 heads x 128), shared modulation, a
@@ -11,7 +11,10 @@ two-block text adapter over Qwen3.5-9B's final hidden states, FLUX.2 latents 2x2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.utils.checkpoint import checkpoint
+
+from fizgig.training import attn_probe
 
 # transformer/config.json (OpenMOSS-Team/MOSS-Image-Base) - the only configuration released
 MOSS_CONFIG = dict(dim=3072, ffn_dim=8192, num_heads=24, num_layers=42, text_dim=4096, freq_dim=256,
@@ -42,14 +45,25 @@ def _rotate(x, rope):
     return x * cos + torch.cat((-b, a), -1) * sin
 
 
+# A training batch's padded captions need a key mask, and with one PyTorch's default choice falls back to its
+# memory-efficient kernel; cuDNN takes the mask at almost no cost (#221: batch 3 at 0.25 MP 1.60 -> 1.31 s/step on an
+# A6000, with stack_conds padding the captions to a multiple of 16 so cuDNN plans only a few shapes). A preference,
+# not a demand: a GPU or shape cuDNN can't take falls back down the list.
+_MASKED_BACKENDS = [SDPBackend.CUDNN_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+
+
 def _attention(q, k, v, rope, heads, key_mask=None):
     shape = (*q.shape[:2], heads, q.shape[-1] // heads)
     q = _rotate(q.reshape(shape), rope).transpose(1, 2)
     k = _rotate(k.reshape(shape), rope).transpose(1, 2)
     v = v.reshape(shape).transpose(1, 2)
     q, k = q.to(v.dtype), k.to(v.dtype)
+    if attn_probe._ACTIVE is not None:      # training maps: the trigger word's attention (training/attn_probe.py)
+        attn_probe.see(q, k, key_mask)
     if key_mask is not None:            # a training batch (forward_batch): each picture's padded caption tokens dropped
-        return F.scaled_dot_product_attention(q, k, v, attn_mask=key_mask[:, None, None, :]).transpose(1, 2).flatten(2)
+        with sdpa_kernel(_MASKED_BACKENDS, set_priority=True):
+            out = F.scaled_dot_product_attention(q, k, v, attn_mask=key_mask[:, None, None, :])
+        return out.transpose(1, 2).flatten(2)
     from fizgig.modules import int8_attention as _i8a      # workbench renders only, when opted in; else None
     out = _i8a.attend(q, k, v)
     if out is None:
@@ -243,6 +257,7 @@ class MOSSImageDiT(nn.Module):
             rope = self.rope(height, width, context.shape[1], hidden_states.device).to(video.dtype)
             text = self.text_embedder(context, rope[:, height * width:])
             x = torch.cat((video, text), 1)
+            attn_probe.layout((0, video.shape[1]), video.shape[1], x.shape[1])
             m = mod[index:index + 1]
             for i, layer in enumerate(self.layers):
                 if self.blocks_to_swap:
@@ -296,6 +311,7 @@ class MOSSImageDiT(nn.Module):
         key_mask = torch.cat([torch.ones(batch, n, dtype=torch.bool, device=dev), mask], 1)
         text = self.text_embedder(encoder_hidden_states.to(dev), rope[:, n:], mask)
         x = torch.cat((video, text), 1)
+        attn_probe.layout((0, n), n, x.shape[1])
         layers = list(self.layers) if self.blocks_to_swap else None
         for i, layer in enumerate(self.layers):
             if self.blocks_to_swap:

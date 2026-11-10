@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from fizgig.families.driver import FamilyDriver, prior_base, weighted_loss, with_prior
+from fizgig.families.driver import FamilyDriver, picture_losses, prior_base, weighted_loss, with_prior
 from fizgig.qwen_image21 import sampling as S
 
 logger = logging.getLogger(__name__)
@@ -234,13 +234,14 @@ class QwenImage21Driver(FamilyDriver):
         return loss, {"t": t}
 
     def stack_conds(self, conds):
-        """Batch Size above 1: the captions zero-padded to the longest with a mask of each one's real tokens. The DiT
-        drops the padded keys and places each picture's image after its own real tokens, as its unpadded caption
-        would (QwenImage21DiT.forward)."""
+        """Batch Size above 1: the captions zero-padded to the longest, rounded up to a multiple of 16 (few shapes for
+        cuDNN's attention plans, #221), with a mask of each one's real tokens. The DiT drops the padded keys and places
+        each picture's image after its own real tokens, as its unpadded caption would (QwenImage21DiT.forward)."""
         if any("ref_mask" in c for c in conds):
             return None                     # an edit's before-images: batch 1
         hs = [c["hidden_states"][0] for c in conds]
         L = max(h.shape[0] for h in hs)
+        L += -L % 16
         return {"hidden_states": torch.stack([torch.cat([h, h.new_zeros(L - h.shape[0], h.shape[1])]) for h in hs]),
                 "mask": torch.stack([torch.arange(L, device=h.device) < h.shape[0] for h in hs])}
 
@@ -263,10 +264,9 @@ class QwenImage21Driver(FamilyDriver):
         img_mask = torch.cat([torch.zeros(L, dtype=torch.bool), torch.ones(n // 4, dtype=torch.bool)])[None].to(device)
         tt = torch.tensor(ts, device=device, dtype=torch.bfloat16)
         pred = dit(xt.to(torch.bfloat16), enc.to(torch.bfloat16), tt, [[(1, h, w)]], img_mask, enc_mask)[:, -n:]
-        if loss_mask is None:
-            return F.mse_loss(pred.float(), noise - x0), {"t": sum(ts) / len(ts)}
-        mw = S.pack(loss_mask.to(device).float()).mean(dim=-1)
-        return weighted_loss((pred.float() - (noise - x0)).pow(2).mean(dim=-1), mw), {"t": sum(ts) / len(ts)}
+        mw = None if loss_mask is None else S.pack(loss_mask.to(device).float()).mean(dim=-1)
+        per = picture_losses((pred.float() - (noise - x0)).pow(2).mean(dim=-1), mw)
+        return per.mean(), {"t": sum(ts) / len(ts), "per": per, "ts": [float(v) for v in ts]}
 
     def noise_latents(self, latents, generator, *, min_t=0.0, max_t=1.0):
         h, w = latents.shape[-2:]
@@ -274,6 +274,15 @@ class QwenImage21Driver(FamilyDriver):
         noise = torch.randn(x0.shape, generator=generator).to(latents.device)
         t = self._sample_t(h * w, generator, min_t, max_t)
         return {"xt": (1 - t) * x0 + t * noise, "t": t, "hw": (h, w)}
+
+    def map_target(self, latents, state):
+        """The target in predict()'s layout (training maps): noise - x0, packed."""
+        return (state["xt"].float() - S.pack(latents.float()).to(state["xt"].device)) / float(state["t"])
+
+    def trigger_text(self, tokenizer, caption):
+        """The encoder's template; its system turn is dropped (qwen_image21/embedder.py TEMPLATE_T2I, drop_idx)."""
+        from fizgig.qwen_image21.embedder import SYS_PROMPT, TEMPLATE_T2I
+        return TEMPLATE_T2I.replace("{}", caption, 1), f"<|im_start|>system\n{SYS_PROMPT}<|im_end|>\n"
 
     def predict(self, dit, state, cond):
         h, w = state["hw"]
