@@ -4,11 +4,14 @@ import io
 import json
 import re
 from html.parser import HTMLParser
+from pathlib import Path
 
-DICT = r"d:/Fizgig-CN/cn-launcher/dict.json"
-OUT = r"d:/Fizgig-CN/cn-launcher/_untranslated_all.txt"
-INDEX_HTML = r"d:/Fizgig-CN/src/fizgig/web/static/index.html"
-APP_JS = r"d:/Fizgig-CN/src/fizgig/web/static/app.js"
+LAUNCHER = Path(__file__).resolve().parent            # <repo>/cn-launcher
+ROOT = LAUNCHER.parent                                # repo root
+DICT = LAUNCHER / "dict.json"
+OUT = LAUNCHER / "_untranslated_all.txt"
+INDEX_HTML = ROOT / "src" / "fizgig" / "web" / "static" / "index.html"
+APP_JS = ROOT / "src" / "fizgig" / "web" / "static" / "app.js"
 
 # ---------- 词典加载与匹配（与 translator.js 保持一致） ----------
 with io.open(DICT, encoding="utf-8") as f:
@@ -92,12 +95,15 @@ def looks_ui(s, kind="text"):
     # 含变量的模板骨架：保留"文字类"句子，排除 HTML/代码结构
     if kind == "tpl":
         j = s.replace("\x00", " x ")
-        if re.search(r"[<>{}]", j):
+        if re.search(r"[<>{}=&]", j):
             return False
         if re.search(r"\w\s*=\s*[\"']", j) or re.search(r"\b(class|style|href|src|id|data-\w+)\s*:", j):
             return False
         # 函数调用/单位片段（var( x )、rgba( , )、width:%）
         if re.search(r"\b(var|rgba|rgb|url|calc|hsl|https?|api)\b", j, re.I):
+            return False
+        # 文件名模板（x_tweakedx.wav 等）
+        if re.search(r"\.(wav|png|jpe?g|mp[34]|zip|txt|json|safetensors)\b", j):
             return False
         if re.search(r"\w+\([^)]{0,3}\)", j):
             return False
@@ -125,6 +131,19 @@ def looks_ui(s, kind="text"):
     if "$" in t:
         return False
     if any(h in t for h in CODE_HINTS):
+        return False
+    # 引号错位产生的碎片 / 代码符号 / CSS 函数 / 文件名 / 单字母键
+    if re.match(r"^[a-z]\s", t) or re.match(r"^[,:;)\]}]", t):
+        return False
+    if '", ' in t or '" : "' in t or re.search(r"&&|\|\||\s\?\s|\],|: \[", t):
+        return False
+    if re.search(r"\b(?:var|rgba|rgb|calc|linear-gradient|hsl)\s*\(", t):
+        return False
+    if re.match(r"^[a-z]$", t) or re.match(r"^[a-z]:$", t):
+        return False
+    if re.match(r"^[\w.\-]+\.(wav|png|jpg|jpeg|mp4|mp3|zip|txt|json|safetensors|py|md)$", t):
+        return False
+    if t.startswith("hf_"):
         return False
     if re.match(r"^[,)+?=]", t) or re.search(r"[,+(]$", t):
         return False

@@ -5,13 +5,17 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 import urllib.request
+from pathlib import Path
 
-BASE = r"d:/Fizgig-CN"
-PY = BASE + r"/venv/Scripts/python.exe"
-DICT = BASE + r"/cn-launcher/dict.json"
-OUT = BASE + r"/cn-launcher/_untranslated_apis.txt"
+LAUNCHER = Path(__file__).resolve().parent            # <repo>/cn-launcher
+BASE = LAUNCHER.parent                                # repo root
+PY = BASE / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+PY = PY if PY.is_file() else Path(sys.executable)     # 无 venv 时退回当前解释器
+DICT = LAUNCHER / "dict.json"
+OUT = LAUNCHER / "_untranslated_apis.txt"
 PORT = 8398
 
 APIS = [
@@ -50,13 +54,17 @@ def apply(text):
         return s.replace(t, exact[t])
     if not t:
         return None
-    m = re.search(r"[:：]\s*$", t)
+    # 与 translator.js 对齐：折叠空白后再查
+    t2 = re.sub(r"\s+", " ", t)
+    if t2 in exact:
+        return s.replace(t, exact[t2])
+    m = re.search(r"[:：]\s*$", t2)
     if m:
-        nc = t[:m.start()]
-        if nc != t and nc in exact:
-            return s.replace(t, exact[nc] + t[m.start():])
+        nc = t2[:m.start()]
+        if nc != t2 and nc in exact:
+            return s.replace(t, exact[nc] + t2[m.start():])
     for rx, zh in regexes:
-        mm = rx.search(t)
+        mm = rx.search(t2)
         if mm:
             return s.replace(t, re.sub(r"\$(\d+)", lambda g: mm.group(int(g.group(1))) or "", zh))
     return None
