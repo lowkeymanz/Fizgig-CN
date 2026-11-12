@@ -11511,6 +11511,870 @@
     {
       "en": "Masked training",
       "zh": "蒙版训练"
+    },
+    {
+      "en": "For full training speed on Windows",
+      "zh": "在 Windows 上获得完整的训练速度"
+    },
+    {
+      "en": "NVIDIA's driver can quietly move part of a training run into system RAM when the card fills up. Nothing crashes, but training can run several times slower, and a driver or Windows update can switch it on.",
+      "zh": "当显卡显存占满时，NVIDIA 驱动会悄悄把训练运行的一部分搬到系统内存里。不会崩溃，但训练可能慢上好几倍，而且驱动或 Windows 更新随时可能把它打开。"
+    },
+    {
+      "en": "To turn it off:",
+      "zh": "关闭方法："
+    },
+    {
+      "en": "NVIDIA Control Panel",
+      "zh": "NVIDIA 控制面板"
+    },
+    {
+      "en": "Manage 3D settings",
+      "zh": "管理 3D 设置"
+    },
+    {
+      "en": "Global Settings",
+      "zh": "全局设置"
+    },
+    {
+      "en": "CUDA - Sysmem Fallback Policy",
+      "zh": "CUDA - 系统内存回退策略"
+    },
+    {
+      "en": "Prefer No Sysmem Fallback",
+      "zh": "优先不使用系统内存回退"
+    },
+    {
+      "en": "Use Global Settings, not Program Settings: Fizgig's Python there is only a launcher, so a per-program setting never reaches it. With it off, a run too big for your card stops with an out-of-memory message instead of slowing down, and Fizgig retries it lighter by itself.",
+      "zh": "请使用全局设置而非程序设置：Fizgig 那里的 Python 只是启动器，针对单个程序的设置对它不起作用。关闭后，超过显卡容量的运行会以显存不足的提示停止，而不是变慢，Fizgig 会自行以更轻的配置重试。"
+    },
+    {
+      "en": "More in the install guide",
+      "zh": "详见安装指南"
+    },
+    {
+      "en": "Peak AdaFace is about 70%: that's what two photos of the same person score against each other, so no picture reaches 100%.",
+      "zh": "AdaFace 峰值约为 70%：同一人的两张照片互相打分也就是这个水平，所以没有任何一张图能达到 100%。"
+    },
+    {
+      "re": "^Your (.+?) training photos score (.+?) against the 3 reference photos \\(most between (.+?) and (.+?)\\)\\. A preview there looks as much like the person as a real photo does - nothing reaches 100%, real photos don't either\\.$",
+      "zh": "你的 $1 张训练照片对这 3 张参考照片的得分为 $2（大多数在 $3 到 $4 之间）。预览能达到这个位置，说明它看起来和真人照片一样像本人——没有一张能达到 100%，真人照片也达不到。"
+    },
+    {
+      "re": "best so far",
+      "zh": "目前最佳"
+    },
+    {
+      "re": "average over",
+      "zh": "平均"
+    },
+    {
+      "re": " - above most of your photos",
+      "zh": " —— 高于你的大多数照片"
+    },
+    {
+      "re": " - level with your photos",
+      "zh": " —— 与你的照片持平"
+    },
+    {
+      "re": " - within your photos' range",
+      "zh": " —— 在你的照片范围内"
+    },
+    {
+      "en": "no face",
+      "zh": "无脸"
+    },
+    {
+      "en": "(not in the training folder now)",
+      "zh": "（当前不在训练文件夹中）"
+    },
+    {
+      "en": "Mean over the last 5 epochs (the watch's window)",
+      "zh": "最近 5 个 epoch 的平均值（监视窗口）"
+    },
+    {
+      "en": "Waiting for the next epoch boundary, when the trainer re-encodes it",
+      "zh": "等待下一个 epoch 边界，届时训练器会重新编码它"
+    },
+    {
+      "re": "^caption fixed at epoch (.+?)$",
+      "zh": "epoch $1 时标注已固定"
+    },
+    {
+      "en": "Edit caption",
+      "zh": "编辑标注"
+    },
+    {
+      "en": "Caption what the picture actually shows - viewpoint (from behind, side profile), pose, lighting, what's in the way.",
+      "zh": "描述图片实际呈现的内容——视角（背后、侧面）、姿态、光线，以及被遮挡的部分。"
+    },
+    {
+      "en": "Save and queue for re-encode",
+      "zh": "保存并排队重新编码"
+    },
+    {
+      "en": "Save caption",
+      "zh": "保存标注"
+    },
+    {
+      "en": "Pick a Start/End that span at least two waypoints.",
+      "zh": "请选择至少跨越两个航点的起点/终点。"
+    },
+    {
+      "en": "Add at least two comma-separated custom words to travel between.",
+      "zh": "请添加至少两个用逗号分隔的自定义词作为旅程两端。"
+    },
+    {
+      "en": "Render it",
+      "zh": "渲染它"
+    },
+    {
+      "en": "(clip previews)",
+      "zh": "（剪辑预览）"
+    },
+    {
+      "re": "^Switched to (.+?) to match the checkpoints\\.$",
+      "zh": "已切换到 $1 以匹配检查点。"
+    },
+    {
+      "en": "Scoring… (the first run loads the face model)",
+      "zh": "正在评分…（首次运行会加载人脸模型）"
+    },
+    {
+      "en": "No faces detected in the renders or subject photos. Likeness needs a face: for a style or object LoRA, judge the epochs by eye.",
+      "zh": "在渲染图或主体照片中未检测到人脸。相似度需要人脸：对于风格或物体 LoRA，请用肉眼判断各 epoch。"
+    },
+    {
+      "en": "None chosen",
+      "zh": "未选择"
+    },
+    {
+      "en": "Building likeness clip…",
+      "zh": "正在生成相似度剪辑…"
+    },
+    {
+      "en": "Building frames…",
+      "zh": "正在生成帧…"
+    },
+    {
+      "re": "^Saved (.+?) frames → (.+?)$",
+      "zh": "已保存 $1 帧 → $2"
+    },
+    {
+      "en": "Try the GIF format instead.",
+      "zh": "请改用 GIF 格式。"
+    },
+    {
+      "en": "Model unloaded - the renders stay here until the next render.",
+      "zh": "模型已卸载——渲染结果会保留到下次渲染。"
+    },
+    {
+      "en": "Saving stills…",
+      "zh": "正在保存静帧…"
+    },
+    {
+      "re": "^Saved (.+?) stills → (.+?)$",
+      "zh": "已保存 $1 张静帧 → $2"
+    },
+    {
+      "en": "None (picture change only)",
+      "zh": "无（仅图片变化）"
+    },
+    {
+      "en": "Error - see below.",
+      "zh": "出错了——见下方。"
+    },
+    {
+      "en": "Extract LoRAs",
+      "zh": "提取 LoRA"
+    },
+    {
+      "en": "Select blocks:",
+      "zh": "选择块："
+    },
+    {
+      "en": "Extracting…",
+      "zh": "正在提取…"
+    },
+    {
+      "en": "Custom is selected but no blocks are ticked.",
+      "zh": "已选择“自定义”，但没有勾选任何块。"
+    },
+    {
+      "en": "Target rank is a whole number, 1 or more.",
+      "zh": "目标 rank 必须是大于等于 1 的整数。"
+    },
+    {
+      "re": "^Extracting to (.+?)…$",
+      "zh": "正在提取到 $1…"
+    },
+    {
+      "re": "^SVD: layer (.+?) of (.+?)…$",
+      "zh": "SVD：第 $1 / $2 层…"
+    },
+    {
+      "re": "^SVD: (.+?) of (.+?) layers…$",
+      "zh": "SVD：$1 / $2 层…"
+    },
+    {
+      "re": "^Saved (.+?) LoRAs in (.+?)$",
+      "zh": "已在 $2 中保存 $1 个 LoRA"
+    },
+    {
+      "re": "^Download r(.+?)$",
+      "zh": "下载 r$1"
+    },
+    {
+      "re": "^The extraction failed: (.+?)$",
+      "zh": "提取失败：$1"
+    },
+    {
+      "en": "Usage hint",
+      "zh": "使用提示"
+    },
+    {
+      "en": "Description:",
+      "zh": "描述："
+    },
+    {
+      "en": "Replace…",
+      "zh": "替换…"
+    },
+    {
+      "en": "Remove this field",
+      "zh": "移除此字段"
+    },
+    {
+      "re": "^Loaded - (.+?) metadata key(.+?) found\\.$",
+      "zh": "已加载——找到 $1 个元数据键。"
+    },
+    {
+      "en": "Load a .safetensors file first.",
+      "zh": "请先加载 .safetensors 文件。"
+    },
+    {
+      "re": "^Save the changes into (.+?)\\?$",
+      "zh": "将更改保存到 $1？"
+    },
+    {
+      "en": "· detail crop",
+      "zh": "· 细节裁剪"
+    },
+    {
+      "en": "Sort by this column",
+      "zh": "按此列排序"
+    },
+    {
+      "re": "^Added to (.+?) captions\\.$",
+      "zh": "已添加到 $1 个标注。"
+    },
+    {
+      "en": "Every caption already has that.",
+      "zh": "每个标注都已有该内容。"
+    },
+    {
+      "en": "your RunPod account",
+      "zh": "你的 RunPod 账户"
+    },
+    {
+      "en": "Delete it",
+      "zh": "删除它"
+    },
+    {
+      "re": "^(.+?) is being deleted on RunPod\\.$",
+      "zh": "正在删除 RunPod 上的 $1。"
+    },
+    {
+      "re": "^(.+?) is stopping\\. Its files stay on its volume for next time\\.$",
+      "zh": "$1 正在停止。其文件保留在其卷上，下次再用。"
+    },
+    {
+      "en": "Any data centre",
+      "zh": "任意数据中心"
+    },
+    {
+      "re": "^about (.+?)× a 5090's speed$",
+      "zh": "约为 5090 速度的 $1 倍"
+    },
+    {
+      "en": "Deploy ↗",
+      "zh": "部署 ↗"
+    },
+    {
+      "re": "^RunPod's deploy page with (.+?) and Fizgig's template chosen$",
+      "zh": "已选定 $1 与 Fizgig 模板的 RunPod 部署页"
+    },
+    {
+      "en": "Add your RunPod API key above to see which cards are free right now, their prices and what a run costs on each.",
+      "zh": "在上方填入你的 RunPod API 密钥，即可查看当前哪些显卡空闲、其价格，以及一次运行在每张卡上的花费。"
+    },
+    {
+      "en": "Secure Cloud",
+      "zh": "安全云"
+    },
+    {
+      "en": "Community Cloud (pick it on RunPod's page)",
+      "zh": "社区云（请在 RunPod 页面上选择）"
+    },
+    {
+      "en": "Best value",
+      "zh": "最佳性价比"
+    },
+    {
+      "en": "Show the best 5",
+      "zh": "显示最佳的 5 个"
+    },
+    {
+      "re": "^(.+?) more cards? (?:has|have) none free right now$",
+      "zh": "还有 $1 张卡当前都无空闲"
+    },
+    {
+      "re": "^(.+?) cost more than your limit$",
+      "zh": "有 $1 张卡超过你的预算上限"
+    },
+    {
+      "en": "On your network",
+      "zh": "在你的网络上"
+    },
+    {
+      "en": "By address",
+      "zh": "按地址"
+    },
+    {
+      "en": "This computer",
+      "zh": "这台电脑"
+    },
+    {
+      "en": "Checking your helpers...",
+      "zh": "正在检查你的辅助设备…"
+    },
+    {
+      "en": "Not answering: is it on, awake and running Fizgig?",
+      "zh": "无响应：它是否开机、唤醒并正在运行 Fizgig？"
+    },
+    {
+      "re": "^Training its own run \\((.+?)\\)\\.$",
+      "zh": "正在训练自己的运行（$1）。"
+    },
+    {
+      "en": "Idle, and billed while it runs: stop the pod on the Pods tab when you're done",
+      "zh": "空闲，但运行期间仍会计费：完成后请在 Pods 标签页停止该 pod。"
+    },
+    {
+      "en": "Idle, and billed while it runs if it's rented (Vast.ai): stop it on Vast's site when you're done",
+      "zh": "空闲，但若为租用（Vast.ai）运行期间仍会计费：完成后请在 Vast 网站上停止它。"
+    },
+    {
+      "re": "^Ready: it takes this run's next (.+?)$",
+      "zh": "就绪：它会接本次运行的下一个 $1"
+    },
+    {
+      "en": "Ready: it starts with this computer's next run",
+      "zh": "就绪：它会从本机的下一次运行开始参与"
+    },
+    {
+      "re": "previews for epoch ",
+      "zh": "epoch 的预览"
+    },
+    {
+      "re": " more queued",
+      "zh": " 个排队中"
+    },
+    {
+      "re": "^Training its share of epoch (.+?)$",
+      "zh": "正在训练 epoch $1 中自己的份额"
+    },
+    {
+      "en": "Rendering a check picture",
+      "zh": "正在渲染检查图"
+    },
+    {
+      "re": "^every (.+?) epochs$",
+      "zh": "每 $1 个 epoch"
+    },
+    {
+      "re": "^(.+?) ms away$",
+      "zh": "距离 $1 毫秒"
+    },
+    {
+      "en": "Added by itself",
+      "zh": "自行添加"
+    },
+    {
+      "en": "One of your RunPod pods: added once it started, and taken off the list when the pod is deleted. Tick a job to use it",
+      "zh": "你的一个 RunPod pod：启动后即被加入，pod 被删除时从列表移除。勾选一项任务即可使用它。"
+    },
+    {
+      "en": "Connected from its side",
+      "zh": "由它主动连接"
+    },
+    {
+      "en": "It connected to this Fizgig (a pod can't reach a home computer, so the home computer does the connecting)",
+      "zh": "它连接到了本 Fizgig（pod 无法主动连到家用电脑，因此由家用电脑发起连接）"
+    },
+    {
+      "en": "Check picture",
+      "zh": "检查图"
+    },
+    {
+      "en": "Stop using it as a helper (the computer itself is untouched)",
+      "zh": "停止将其用作辅助设备（该电脑本身不受影响）"
+    },
+    {
+      "re": "^Models for (.+?):$",
+      "zh": "$1 的模型："
+    },
+    {
+      "en": "Get them now",
+      "zh": "立即获取"
+    },
+    {
+      "en": "Link: not measured yet",
+      "zh": "链路：尚未测量"
+    },
+    {
+      "en": "Measuring the link...",
+      "zh": "正在测量链路…"
+    },
+    {
+      "en": "Type speeds",
+      "zh": "输入速度"
+    },
+    {
+      "en": "down Mb/s",
+      "zh": "下行 Mb/s"
+    },
+    {
+      "en": "No helpers yet. Add one in the next card: a pod, or another computer with Fizgig.",
+      "zh": "还没有辅助设备。请在下一张卡片中添加：一个 pod，或另一台运行 Fizgig 的电脑。"
+    },
+    {
+      "en": "password: leave empty",
+      "zh": "密码：留空"
+    },
+    {
+      "re": "^This computer's other GPU: (.+?)$",
+      "zh": "本机的另一块 GPU：$1"
+    },
+    {
+      "en": "Stop using it",
+      "zh": "停止使用"
+    },
+    {
+      "en": "Use it as a helper",
+      "zh": "用作辅助设备"
+    },
+    {
+      "en": "Stop helping",
+      "zh": "停止辅助"
+    },
+    {
+      "en": "Help it with previews",
+      "zh": "帮它渲染预览"
+    },
+    {
+      "en": "Help it train",
+      "zh": "帮它训练"
+    },
+    {
+      "en": "Its checkpoints…",
+      "zh": "它的检查点…"
+    },
+    {
+      "en": "Your pods show here (the Pods tab), once one is running Fizgig.",
+      "zh": "一旦有 pod 运行 Fizgig，你的 pod 就会显示在这里（Pods 标签页）。"
+    },
+    {
+      "re": "^This GPU is helping (.+?)$",
+      "zh": "此 GPU 正在帮助 $1"
+    },
+    {
+      "en": "Bring its checkpoints home as they're saved",
+      "zh": "保存后把它的检查点取回本机"
+    },
+    {
+      "en": "Delete the pod once its run has finished and they're all home",
+      "zh": "待其运行完成且检查点都取回后，删除该 pod"
+    },
+    {
+      "en": "Asking it for its run's checkpoints...",
+      "zh": "正在向它索要其运行的检查点…"
+    },
+    {
+      "re": "^(.+?) hasn't saved a checkpoint yet\\.$",
+      "zh": "$1 尚未保存任何检查点。"
+    },
+    {
+      "en": "Nothing training there.",
+      "zh": "那里没有正在训练的内容。"
+    },
+    {
+      "en": "Get them and open LoRA Royale",
+      "zh": "取回并打开 LoRA 竞技场"
+    },
+    {
+      "en": "Tick at least one.",
+      "zh": "请至少勾选一个。"
+    },
+    {
+      "re": "^Fetching (.+?): (.+?) of (.+?)$",
+      "zh": "正在获取 $1：$2 / $3"
+    },
+    {
+      "en": "The fetch stopped.",
+      "zh": "获取已停止。"
+    },
+    {
+      "en": "Final LoRA",
+      "zh": "最终 LoRA"
+    },
+    {
+      "en": "Added. It's ready: press Open.",
+      "zh": "已添加。它已就绪：按“打开”。"
+    },
+    {
+      "en": "Added. Fizgig on it isn't answering yet (still starting): it shows Ready when it is.",
+      "zh": "已添加。上面的 Fizgig 尚未响应（仍在启动）：就绪后会显示“就绪”。"
+    },
+    {
+      "en": "Added, but nothing answers there yet. A stopped pod needs starting on RunPod (or here, with your API key).",
+      "zh": "已添加，但那里还没有任何响应。已停止的 pod 需要在 RunPod 上（或用你的 API 密钥在这里）启动。"
+    },
+    {
+      "en": "Checking the key with RunPod...",
+      "zh": "正在向 RunPod 校验密钥…"
+    },
+    {
+      "re": "^Key saved\\. (.+?) Fizgig pod(.+?) on your account\\.$",
+      "zh": "密钥已保存。你的账户下有 $1 个 Fizgig pod。"
+    },
+    {
+      "en": "Key removed.",
+      "zh": "密钥已移除。"
+    },
+    {
+      "en": "Use the newest Fizgig",
+      "zh": "使用最新版 Fizgig"
+    },
+    {
+      "en": "Starting again on the newest Fizgig: the page reloads when it's back.",
+      "zh": "正在以最新版 Fizgig 重新启动：恢复后页面会重新载入。"
+    },
+    {
+      "re": "^⬆ Fizgig (.+?) is available$",
+      "zh": "⬆ 有新版 Fizgig $1 可用"
+    },
+    {
+      "re": "^You're on (.+?)\\. (.+?)$",
+      "zh": "你当前是 $1。$2"
+    },
+    {
+      "en": "Training adapter (fl2va)",
+      "zh": "训练适配器（fl2va）"
+    },
+    {
+      "en": "NEEDED for runs on the standard fl2va base. Ostris's frozen LoRA that de-distills the base while yours learns: on for every training step, off for previews, never in your saved LoRA. The updater fetches it; so does the download button below.",
+      "zh": "在标准 fl2va 基座上训练时必需。这是 Ostris 的冻结 LoRA，在你的 LoRA 学习的同时对基座做“去蒸馏”：每一步训练都开启，预览时关闭，永远不会进入你保存的 LoRA。更新器会获取它，下方的下载按钮也会。"
+    },
+    {
+      "en": "~310MB — ostris/minimax_h3_training_adapter → minimax_h3_training_adapter_v3.safetensors",
+      "zh": "约 310MB —— ostris/minimax_h3_training_adapter → minimax_h3_training_adapter_v3.safetensors"
+    },
+    {
+      "en": "Training adapter (Ostris, ~310 MB) — de-distills the base while your LoRA learns",
+      "zh": "训练适配器（Ostris，约 310 MB）—— 在你的 LoRA 学习的同时对基座去蒸馏"
+    },
+    {
+      "en": "Training adapter (ref2va)",
+      "zh": "训练适配器（ref2va）"
+    },
+    {
+      "en": "Ostris's adapter for the Reference (ref2va) base: used instead of the fl2va one when the Training Base is ref2va or the run is a distillation run.",
+      "zh": "用于 Reference（ref2va）基座的 Ostris 适配器：当训练基座为 ref2va、或该运行是蒸馏运行时，用它替代 fl2va 适配器。"
+    },
+    {
+      "en": "~310MB — ostris/minimax_h3_training_adapter → minimax_h3_ref2va_training_adapter_v3.safetensors",
+      "zh": "约 310MB —— ostris/minimax_h3_training_adapter → minimax_h3_ref2va_training_adapter_v3.safetensors"
+    },
+    {
+      "en": "Fetches the DiT, text encoder, both VAEs, the Turbo LoRA and the two training adapters above, plus the Krea 2 Qwen3-VL captioning text encoder (~47 GB all in), and fills in these paths for you — plus the small helper models (Florence-2 captioner, face model for the Look Filter and likeness scoring, EN→ZH translator, Gizmo's Whisper transcriber — ~1.9 GB) so nothing stalls to download later and everything works offline. No HuggingFace account needed — none of these are gated. The reference DiT is left out unless you tick it above: another 21 GB, and it is only used by identity mode.",
+      "zh": "获取 DiT、文本编码器、两个 VAE、Turbo LoRA 以及上面的两个训练适配器，再加上 Krea 2 Qwen3-VL 标注文本编码器（合计约 47 GB），并为你填好这些路径——此外还有小型辅助模型（Florence-2 标注器、用于 Look Filter 与相似度评分的人脸模型、中英翻译器、Gizmo 的 Whisper 转写器，约 1.9 GB），这样之后不会卡在下载上，离线也能全部正常工作。无需 HuggingFace 账号——这些都不是受限模型。除非你在上面勾选，否则不包含参考 DiT：另有 21 GB，仅用于身份模式。"
+    },
+    {
+      "en": "MiniMax H3 Image",
+      "zh": "MiniMax H3 Image"
+    },
+    {
+      "en": "MiniMax H3 Image DiT",
+      "zh": "MiniMax H3 Image DiT"
+    },
+    {
+      "en": "The training base: the pruned int8 file ComfyUI runs, kept int8 on the card (~21 GB), or 4-bit on smaller cards.",
+      "zh": "训练基座：ComfyUI 运行所用的剪枝 int8 文件，在显卡上保持 int8（约 21 GB）；在较小显卡上则用 4-bit。"
+    },
+    {
+      "en": "~40 GB pruned bf16 - loads as 4-bit (NF4 / HQQ), no int8",
+      "zh": "约 40 GB 剪枝 bf16 —— 以 4-bit（NF4 / HQQ）加载，无 int8"
+    },
+    {
+      "en": "MiniMax H3 Image VAE",
+      "zh": "MiniMax H3 Image VAE"
+    },
+    {
+      "en": "Its own VAE: H3's encoder with a decoder made for pictures. Not the H3 video VAE.",
+      "zh": "它自带的 VAE：H3 的编码器搭配专为图片制作的解码器。不是 H3 视频 VAE。"
+    },
+    {
+      "en": "Qwen3-VL-32B text encoder",
+      "zh": "Qwen3-VL-32B 文本编码器"
+    },
+    {
+      "en": "MiniMax H3's text encoder, unchanged (the model card). Used for caching only, then unloaded.",
+      "zh": "MiniMax H3 的文本编码器，原样未改（模型卡）。仅用于缓存，之后即卸载。"
+    },
+    {
+      "en": "~51.5 GB bf16 - the same conditioning (validated on H3), 3.3x the disk",
+      "zh": "约 51.5 GB bf16 —— 相同的条件编码（已在 H3 上验证），占磁盘 3.3 倍"
+    },
+    {
+      "en": "Frozen during training, off in previews and saved LoRAs: keeps MiniMax H3 Image's faces and skin true to the model while the LoRA learns. Without it, people trained on this model turn into caricatures.",
+      "zh": "训练期间冻结，预览与已保存 LoRA 中关闭：在 LoRA 学习时保持 MiniMax H3 Image 的人脸与皮肤忠于模型。没有它，用此模型训练的人物会变成漫画式夸张形象。"
+    },
+    {
+      "en": "Preview prompts rendered periodically during training on the MiniMax H3 Image model being trained. Samples land in <output_dir>/sample/ and the Gallery button below opens the viewer.",
+      "zh": "训练期间周期性渲染的预览提示词，作用于正在训练的 MiniMax H3 Image 模型。样本会存入 <output_dir>/sample/，下方的 Gallery 按钮可打开查看器。"
+    },
+    {
+      "en": "MiniMax H3 Image renders CFG-free in 6 steps, so the knobs it does not use are greyed out.",
+      "zh": "MiniMax H3 Image 以 6 步无 CFG 方式渲染，因此它用不到的旋钮会置灰。"
+    },
+    {
+      "en": "Unused - the model renders without CFG",
+      "zh": "未使用——该模型无需 CFG 即可渲染"
+    },
+    {
+      "en": "The model is distilled to render without CFG",
+      "zh": "该模型经蒸馏，可无需 CFG 渲染"
+    },
+    {
+      "en": "6 = the checkpoint's own schedule, one head per step",
+      "zh": "6 = 检查点自带的调度，每步一个头"
+    },
+    {
+      "en": "euler, simple",
+      "zh": "euler、simple"
+    },
+    {
+      "en": "MiniMax-H3-Image Community License",
+      "zh": "MiniMax-H3-Image 社区许可"
+    },
+    {
+      "en": "Block ids follow MiniMax H3's (h3blk_0-49, h3_rf_0-1): the same DiT layout.",
+      "zh": "块 ID 遵循 MiniMax H3（h3blk_0-49、h3_rf_0-1）：相同的 DiT 布局。"
+    },
+    {
+      "en": "MiniMax H3's kohya keys: ComfyUI's MiniMaxH3Image model has H3's module names.",
+      "zh": "MiniMax H3 的 kohya 键：ComfyUI 的 MiniMaxH3Image 模型使用 H3 的模块名。"
+    },
+    {
+      "en": "Keeps MiniMax H3 Image true to itself while your LoRA learns: frozen at 1.0 for every training step, off for previews and never in your saved file. Without it people trained on this model turn into caricatures.",
+      "zh": "在你的 LoRA 学习时保持 MiniMax H3 Image 忠于自身：每一步训练都以 1.0 冻结，预览时关闭，且永远不会进入你保存的文件。没有它，用此模型训练的人物会变成漫画式夸张形象。"
+    },
+    {
+      "en": "Pairs of an original and its edited version, the same crop and shape - about 40 pairs. Each photo 1 MP or larger; Fizgig resizes them.",
+      "zh": "原图与其编辑版本的成对图片，裁剪与形状一致——约 40 对。每张照片 1 MP 或更大；Fizgig 会调整其大小。"
+    },
+    {
+      "en": "MiniMax-H3-Image (distilled)",
+      "zh": "MiniMax-H3-Image（蒸馏版）"
+    },
+    {
+      "en": "6 steps, no CFG, no negative prompt - the API refuses anything else. Best around 16 MP; 4-20 MP works.",
+      "zh": "6 步、无 CFG、无反向提示词——API 拒绝其它任何参数。约 16 MP 效果最佳；4-20 MP 均可。"
+    },
+    {
+      "en": "✨ MiniMax H3 Image Standard (rank 32, full model)",
+      "zh": "✨ MiniMax H3 Image 标准（rank 32，全模型）"
+    },
+    {
+      "en": "✨ MiniMax H3 Image Style (rank 16)",
+      "zh": "✨ MiniMax H3 Image 风格（rank 16）"
+    },
+    {
+      "en": "✨ MiniMax H3 Image Edit (rank 8)",
+      "zh": "✨ MiniMax H3 Image 编辑（rank 8）"
+    },
+    {
+      "en": "✨ MiniMax H3 Image Slider (rank 8)",
+      "zh": "✨ MiniMax H3 Image 滑杆（rank 8）"
+    },
+    {
+      "en": "Likeness optimization",
+      "zh": "相似度优化"
+    },
+    {
+      "en": "Weights training toward the last of the model's 6 steps, the nearly finished picture, where skin, eyes and fine detail are made, changing over the run so the earlier steps (pose, layout, the shape of things) keep up. Untick for H3 Image's own even share.",
+      "zh": "让训练权重偏向该模型 6 步中的最后一步——即接近完成的画面，那里生成皮肤、眼睛与细节；并随运行推进而变化，让更早的步骤（姿态、布局、物体形状）跟上。取消勾选则使用 H3 Image 自身的均分。"
+    },
+    {
+      "en": "likeness optimization",
+      "zh": "相似度优化"
+    },
+    {
+      "en": "% at the clean end, to the hinge",
+      "zh": "在低噪声端的百分比，直到拐点"
+    },
+    {
+      "en": "Rises to",
+      "zh": "升至"
+    },
+    {
+      "en": "Climbs evenly from Before to this by the hinge (only Before's own epochs while alternating).",
+      "zh": "在拐点之前，从“之前”均匀攀升至此（交替时仅“之前”自身的 epoch 会攀升）。"
+    },
+    {
+      "en": "% by the hinge (blank: no climb)",
+      "zh": "拐点处的百分比（留空：不攀升）"
+    },
+    {
+      "en": "Hinge epoch",
+      "zh": "拐点 epoch"
+    },
+    {
+      "en": "the last epoch of Before",
+      "zh": "“之前”的最后一个 epoch"
+    },
+    {
+      "en": "Slide over",
+      "zh": "过渡"
+    },
+    {
+      "en": "Starts after the hinge; After's alternating, if picked, starts when it ends.",
+      "zh": "在拐点之后开始；“之后”的交替（若已选）在其结束时开始。"
+    },
+    {
+      "en": "epochs from Before to After (0: a jump)",
+      "zh": "从“之前”到“之后”的 epoch 数（0：直接跳变）"
+    },
+    {
+      "en": "After the hinge",
+      "zh": "拐点之后"
+    },
+    {
+      "en": "% at the clean end, after the hinge",
+      "zh": "拐点之后低噪声端的百分比"
+    },
+    {
+      "en": "That side switches between the two shares each epoch, starting with its own. Off: each side holds its own.",
+      "zh": "那一侧每个 epoch 在两个份额之间切换，从自身份额开始。关闭：每一侧保持各自的份额。"
+    },
+    {
+      "en": "Early in the run, the face (or the part you pick below) counts for much more than the rest of the picture, so it's learned faster. For sets of medium and full-length shots, where the face is small in the frame. Needs Target Megapixels 0.75 or more.",
+      "zh": "在运行早期，人脸（或你在下方选定的部位）在整张图片中的权重远高于其余部分，因此学得更快。适用于中景与全身镜头、画面中人脸较小的数据集。需要目标百万像素为 0.75 或更高。"
+    },
+    {
+      "en": "The pictures to bring into the edits: a person, an object, a place.",
+      "zh": "要带入编辑的图片：一个人、一件物体、一个地点。"
+    },
+    {
+      "en": "Top-end likeness for MiniMax H3 Image",
+      "zh": "MiniMax H3 Image 的顶级相似度"
+    },
+    {
+      "en": "MiniMax H3 Image now trains likeness at the very top end: on our hardest test dataset the best previews look more like the person than all but two of their own 45 photos, and that held on two more datasets. Load the Standard preset (0.25 MP) and train with its settings as they are.",
+      "zh": "MiniMax H3 Image 现在能把相似度训练到顶级水平：在我们最难的测试数据集上，最佳预览比本人 45 张照片中的 43 张都更像本人，这一结果在另外两个数据集上也成立。加载 Standard 预设（0.25 MP）并保持其默认设置训练即可。"
+    },
+    {
+      "en": "Likeness scores now come from AdaFace ViT instead of ArcFace, and the Samples gallery's chart shows your own photos' range: the realistic top, since real photos never score 100%.",
+      "zh": "相似度评分现在来自 AdaFace ViT 而非 ArcFace，Samples 画廊的图表会显示你自己照片的区间：这才是现实的上限，因为真人照片永远不会得到 100%。"
+    },
+    {
+      "en": "Likeness optimization for MiniMax H3 Image",
+      "zh": "MiniMax H3 Image 的相似度优化"
+    },
+    {
+      "en": "MiniMax H3 Image has a new Likeness optimization, and in our tests it improves likeness dramatically. It's on in the Standard preset: load it to pick it up. It replaces H3 Image's Clean-end share box.",
+      "zh": "MiniMax H3 Image 新增了相似度优化，在我们的测试中它能显著提升相似度。Standard 预设中已开启：加载该预设即可启用。它取代了 H3 Image 的 Clean-end share 框。"
+    },
+    {
+      "en": "It will be updated over the coming days with more ways to customise it.",
+      "zh": "未来几天会继续更新，带来更多自定义方式。"
+    },
+    {
+      "en": "Training suddenly slow on Windows? Turn off Sysmem Fallback",
+      "zh": "Windows 上训练突然变慢？关闭系统内存回退"
+    },
+    {
+      "en": "If training is suddenly several times slower, especially after a driver or Windows update, NVIDIA's driver is probably spilling part of the run into system RAM.",
+      "zh": "如果训练突然慢了好几倍，尤其是在驱动或 Windows 更新之后，很可能是 NVIDIA 驱动把运行的一部分溢出了到系统内存里。"
+    },
+    {
+      "en": "NVIDIA Control Panel > Manage 3D settings > Global Settings: set CUDA - Sysmem Fallback Policy to Prefer No Sysmem Fallback, Apply, and restart Fizgig. Use Global Settings, not Program Settings.",
+      "zh": "NVIDIA 控制面板 > 管理 3D 设置 > 全局设置：把 CUDA - 系统内存回退策略设为“优先不使用系统内存回退”，点应用，并重启 Fizgig。请用全局设置，而非程序设置。"
+    },
+    {
+      "en": "MiniMax H3 Image presets start at 2.8e-4",
+      "zh": "MiniMax H3 Image 预设从 2.8e-4 起步"
+    },
+    {
+      "en": "MiniMax H3 Image presets, and Element boost to try",
+      "zh": "MiniMax H3 Image 预设，以及可尝试的 Element boost"
+    },
+    {
+      "en": "MiniMax H3 Image, and out-of-memory recovery",
+      "zh": "MiniMax H3 Image，以及显存不足恢复"
+    },
+    {
+      "en": "MiniMax H3 RefMod",
+      "zh": "MiniMax H3 RefMod"
+    },
+    {
+      "en": "How much of training goes to nearly clean pictures (the less noisy half of the steps), where skin, eyes and fine detail are made. The rest goes to the noisier half, which sets movement, pose and layout. Higher: more detail and likeness. Lower: more movement and composition. Fizgig's presets use 60; MiniMax H3's own default is 8, weighted to movement.",
+      "zh": "训练中多少比例用于接近干净的图片（噪声较低的那一半步骤），也就是生成皮肤、眼睛和细节的地方。其余用于噪声较高的那一半，负责动作、姿态和构图。数值越高：细节与相似度越多；越低：动作与构图越多。Fizgig 预设使用 60；MiniMax H3 自身默认是 8，偏向动作。"
+    },
+    {
+      "en": "The pictures to bring into the edits: a person, an object, a place. Name each after the photo it belongs to, adding _1, _2 ...: for beach.jpg, its extras are beach_1.jpg, beach_2.jpg. The number is the order the model sees them in: beach_1 is the second picture after the original, beach_2 the third. Say so in the edit instruction, e.g. \"Put the man from the second picture into this scene.\" A photo can have none (it trains as a normal pair) or up to 15. Any shape or file type.",
+      "zh": "要带入编辑的图片：一个人、一件物体、一个地点。\n按所属照片为它们命名，并加 _1、_2 ……：例如 beach.jpg 的额外图片就是 beach_1.jpg、beach_2.jpg。\n编号是模型看到它们的顺序：beach_1 是原图之后的第二张，beach_2 是第三张。请在编辑指令中说明，例如“把第二张图片里的人放进这个场景”。\n一张照片可以没有（作为普通配对训练），也可以最多有 15 张。形状与文件类型不限。"
+    },
+    {
+      "en": "Before the hinge",
+      "zh": "拐点之前"
+    },
+    {
+      "en": "44 transformer blocks (layers.N), 2 noise-refiner blocks (noise_refiner.N) and 2 perceiver layers.",
+      "zh": "44 个 transformer 块（layers.N）、2 个噪声精修块（noise_refiner.N）和 2 个 perceiver 层。"
+    },
+    {
+      "en": "40 dual-stream blocks (double_blocks.N), each with a video and a text stream.",
+      "zh": "40 个双流块（double_blocks.N），每个都包含一条视频流和一条文本流。"
+    },
+    {
+      "en": "kohya keys on the ComfyUI file's own module names (double_blocks.N.img_attn.qkv ...), the form ComfyUI's LoRA loader maps onto the model.",
+      "zh": "以 ComfyUI 文件自身模块名命名的 kohya 键（double_blocks.N.img_attn.qkv ……），即 ComfyUI 的 LoRA 加载器映射到模型上的形式。"
+    },
+    {
+      "en": "Based on early user feedback, MiniMax H3 Image's presets now start Automagic v3 at 2.8e-4 (was 2e-4): better previews at the presets' 0.5 MP. Load a preset to pick it up.",
+      "zh": "根据早期用户反馈，MiniMax H3 Image 的预设现在以 2.8e-4 启动 Automagic v3（原为 2e-4）：在预设的 0.5 MP 下预览更好。加载预设即可启用。"
+    },
+    {
+      "en": "Element boost works best on pictures of 1 MP or more where the boosted part is small in the frame; on small pictures it can teach the LoRA pixelation.",
+      "zh": "Element boost 在 1 MP 及以上、且被增强部分在画面中占比较小的图片上效果最好；在较小图片上它可能让 LoRA 学会像素化。"
+    },
+    {
+      "en": "MiniMax H3 Image's presets now train at 0.5 MP and start Automagic v3 at 2e-4: the model seems to prefer 0.5 MP or more, and Automagic was climbing to about 1.8e-4 from a 1e-4 start anyway. Load a preset to pick these up.",
+      "zh": "MiniMax H3 Image 的预设现在以 0.5 MP 训练，并以 2e-4 启动 Automagic v3：该模型似乎更偏好 0.5 MP 及以上，而 Automagic 本来也会从 1e-4 攀升到约 1.8e-4。加载预设即可启用这些设置。"
+    },
+    {
+      "en": "Element boost is on H3 Image too, under Training Parameters, off in every preset: tick On to try it.",
+      "zh": "Element boost 在 H3 Image 上也有，位于训练参数下，所有预设中默认关闭：勾选“开”即可尝试。"
+    },
+    {
+      "en": "A new model, MiniMax H3 Image: train LoRAs, LoKRs, edit LoRAs and slider LoRAs from photo pairs, with Fizgig's training adapter on by default for photographic skin and likeness. Press Download models for me in Preferences.",
+      "zh": "新模型 MiniMax H3 Image：从照片对训练 LoRA、LoKR、编辑 LoRA 和滑杆 LoRA，默认开启 Fizgig 训练适配器以获得照片级皮肤与相似度。请在偏好设置中按“为我下载模型”。"
+    },
+    {
+      "en": "For every model: a run that runs out of memory carries on by itself where it can, and a failed run no longer holds the queue (from @Murf-Code's Fizgig Advanced). AMD installs use AMD's stable PyTorch (thanks @scryptio).",
+      "zh": "对所有模型而言：显存不足的运行会在可行处自行继续，失败的运行也不再占用队列（来自 @Murf-Code 的 Fizgig Advanced）。AMD 安装使用 AMD 的稳定版 PyTorch（感谢 @scryptio）。"
     }
   ]
 }

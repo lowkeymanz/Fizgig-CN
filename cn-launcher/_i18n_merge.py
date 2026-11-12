@@ -33,11 +33,10 @@ def main(paths):
             have.add(k)
             phrases.append(p)
             added += 1
-    lines = [json.dumps(p, ensure_ascii=False) for p in phrases]
+    # 与 dict.json 既有格式保持一致：indent=2 的美观排版，每个词条独立多行
     with io.open(DICT, "w", encoding="utf-8", newline="\n") as f:
-        f.write('{\n  "phrases": [\n')
-        f.write(",\n".join("    " + ln for ln in lines))
-        f.write("\n  ]\n}\n")
+        json.dump({"phrases": phrases}, f, ensure_ascii=False, indent=2)
+        f.write("\n")
     print("added:", added, "| skipped dup:", dup, "| total:", len(phrases))
 
 
