@@ -405,7 +405,7 @@ def map_status():
 
 def metrics(ref=""):
     """The desktop's metrics strip for the pair on screen: likeness to a reference photo (the Look Filter's face
-    embedder; with Auto look match decided from the reference - ArcFace for a person, DINOv2 for a furry / anime
+    embedder; with Auto look match decided from the reference - AdaFace for a person, DINOv2 for a furry / anime
     face) and repair_studio.metrics' paired numbers - patch grid, face detail, clipping, saturation. CPU only."""
     import numpy as np
     from PIL import Image
@@ -792,7 +792,7 @@ CAT_SHORT = {"style_composition": "Style+Comp", "style_ident_overlap": "Style/ID
 KLEIN_PRESETS = {"✨Reset All": None, "✨Identity Only": ["identity", "style_ident_overlap", "ident_details_overlap"],
                  "✨Style+Composition Only": ["style_composition", "style_ident_overlap"],
                  "✨Details Only": ["details", "ident_details_overlap"]}
-STILLS_SIZES = ["256", "384", "512", "640", "768", "1024", "1280", "1536"]   # the Samples tab's + two quick ones
+STILLS_SIZES = ["256", "384", "512", "640", "768", "1024", "1280", "1536", "2048"]   # the Samples tab's + two quick ones
 
 
 def families():

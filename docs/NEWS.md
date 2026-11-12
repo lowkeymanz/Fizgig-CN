@@ -1,5 +1,51 @@
 # Fizgig news
 
+## 12 Nov 2026: top-end likeness for MiniMax H3 Image
+
+**MiniMax H3 Image now trains likeness at the very top end.** On our hardest test dataset, the best previews look more like the person than all but two of their own 45 photos do, and that held on two more datasets, one harder still. Load **✨ MiniMax H3 Image Standard** (0.25 MP) and train with its settings as they are: a new Likeness optimization schedule (its controls under Advanced), Automagic v4 starting at 2.5e-4 (the most any weight can move, as it steps each one down from there: not comparable to an AdamW rate), and 30 epochs. The presets are back at 0.25 MP: the schedule and the optimizer were what held likeness back, not the picture size.
+
+**Likeness scores now come from AdaFace ViT instead of ArcFace**: its best epochs matched the ones we picked by eye every time. The Samples gallery also shows **your photos**: your own training photos scored against the same reference photos, as a green band on the likeness chart, the realistic top (real photos never score 100%). **Element boost** now needs Target Megapixels 0.75 or more.
+
+[Fizgig v9.7.0 release notes](https://github.com/shootthesound/Fizgig/releases/tag/v9.7.0)
+
+## 11 Nov 2026: Likeness optimization for MiniMax H3 Image
+
+**MiniMax H3 Image has a new Likeness optimization**, and in our tests it improves likeness dramatically. It weights training toward the nearly finished picture, where skin, eyes and fine detail are made, while pose and layout keep up. It's on in the Standard preset (load **✨ MiniMax H3 Image Standard**) and replaces H3 Image's Clean-end share box. It will be updated over the coming days with more ways to customise it.
+
+[Fizgig v9.6.4 release notes](https://github.com/shootthesound/Fizgig/releases/tag/v9.6.4)
+
+## 11 Nov 2026: training suddenly slow on Windows? Turn off Sysmem Fallback
+
+If training on Windows with an NVIDIA card is suddenly several times slower, especially after a driver or Windows update, the driver is probably spilling part of the run into system RAM. Open NVIDIA Control Panel → Manage 3D settings → **Global Settings**, set **CUDA - Sysmem Fallback Policy** to **Prefer No Sysmem Fallback**, Apply, and restart Fizgig. Use Global Settings, not Program Settings. A few people went from 10–15 s/it back to about 2.5 s/it. Fizgig now shows these steps when it starts, until you tick Don't show this again.
+
+[Install guide](https://github.com/shootthesound/Fizgig/blob/master/docs/INSTALL.md#training-suddenly-several-times-slower-windows-shared-gpu-memory) · [Fizgig v9.6.3 release notes](https://github.com/shootthesound/Fizgig/releases/tag/v9.6.3)
+
+## 11 Nov 2026: MiniMax H3 Image presets start at 2.8e-4
+
+**MiniMax H3 Image's presets now start Automagic v3 at 2.8e-4**, up from 2e-4, based on early user feedback: it gave better previews at the presets' 0.5 MP. Automagic mostly keeps the level it starts from, so the start matters. It worked at 1 MP too in a test run. Load a ✨ preset to pick it up.
+
+**Element boost** works best on pictures of 1 MP or more where the boosted part is small in the frame; on small pictures it can teach the LoRA pixelation, unless the boosted part is large in the frame.
+
+[Fizgig v9.6.2 release notes](https://github.com/shootthesound/Fizgig/releases/tag/v9.6.2)
+
+## 11 Nov 2026: MiniMax H3 Image presets, and Element boost to try
+
+**MiniMax H3 Image's presets now train at 0.5 MP and start Automagic v3 at 2e-4.** The model seems to prefer 0.5 MP or more. Started at 1e-4, Automagic climbed to about 1.8e-4 straight away, so the presets now start it near where it was heading. Load a ✨ preset to pick these up.
+
+**Element boost is on MiniMax H3 Image**, under Training Parameters, off in every preset: tick **On** to try it. Also, 2048 is a preview size in Studio and the Samples tab for every model.
+
+[Fizgig v9.6.1 release notes](https://github.com/shootthesound/Fizgig/releases/tag/v9.6.1)
+
+## 11 Nov 2026: MiniMax H3 Image, and out-of-memory recovery
+
+**A new model: MiniMax H3 Image**, MiniMax's picture model from the H3 family: text-to-image and edits with up to 16 reference pictures, in 6 steps with no CFG. Train LoRAs, LoKRs, edit LoRAs from before/after pairs and slider LoRAs from photo pairs. Fizgig's training adapter is on by default: without it people came out as caricatures, with it the same dataset gave photographic skin and a clear likeness. The presets train on Automagic v3 with 40% of training on the nearly finished picture (Clean-end share). It runs in about 23 GB with int8, 13 GB in 4-bit. Press **Download models for me** in Preferences.
+
+**Out-of-memory recovery, for every model.** A run that runs out of GPU memory or system RAM carries on by itself where it can, up to three times: from its newest save, then a step lighter. A failed run no longer holds the queue; the next one starts. From @Murf-Code's Fizgig Advanced.
+
+**AMD installs use AMD's stable PyTorch** (torch 2.14.0 for ROCm 10.1) instead of the nightlies. Thanks @scryptio (#319).
+
+Update Fizgig on your computers; your pods follow. [MiniMax H3 Image guide](https://github.com/shootthesound/Fizgig/blob/master/docs/MINIMAX_IMAGE.md) · [Fizgig v9.6.0 release notes](https://github.com/shootthesound/Fizgig/releases/tag/v9.6.0)
+
 ## 10 Nov 2026: Element boost, and new MOSS-Image settings
 
 **Element boost (experimental), for MOSS-Image, under Training Parameters.** Early in a run, one part of each picture counts much more than the rest, so it's learned sooner. By default it's the face and hair, which brings likeness in faster, most of all when faces are small in the frame. It runs three boosted stretches then one normal for the first 12 epochs or 600 steps, then the run trains as normal. It works with or without masks. **What it boosts** can also be the face only, or one of the Make masks choices: the clothes, the body, the background and so on. It's on in MOSS-Image's Fast, Standard and Turbo Train presets.

@@ -33,7 +33,7 @@ EMA = ("Off", "0.98 (recommended)", "0.99 (stronger)", "0.995 (long runs only)")
 EMA_SHORT = "Short run (window = ¼ of the run)"
 EMA_HINT = ("Saves and previews a running average of the LoRA instead of its latest step: smoother, less overbaked. "
             "0.98 averages over roughly the last 50 steps.")
-SIZES = ("512", "640", "768", "1024", "1280", "1536")
+SIZES = ("512", "640", "768", "1024", "1280", "1536", "2048")
 KINDS = (("standard", "Standard LoRA"), ("edit", "Edit (original + edited photo pairs)"),
          ("slider", "Slider (a dial between two looks)"), ("finetune", "Fine-tune the whole model"))
 FT_REG_MULT = ("0.05", "0.1", "0.2", "0.3", "0.5", "0.75", "1.0")
@@ -174,6 +174,7 @@ def _option_row(opt):
                 **({"labels": list(opt.suggestions)} if kind == "combo" else {}),
                 **({"warn": opt.warn, "warn_link": opt.warn_link} if opt.warn else {}),
                 **({"featured": True} if opt.featured else {}),
+                **({"advanced_of": opt.requires.partition("=")[0]} if opt.advanced and opt.requires else {}),
                 **({"split": list(opt.split), "split_hint": opt.split_hint} if kind == "split" and opt.split else {}),
                 **({"slide": list(opt.slide), "slide_hint": opt.slide_hint,
                     **({"slide_alt": list(opt.slide_alt)} if opt.slide_alt else {})} if kind == "split" and opt.slide else {}),
@@ -407,13 +408,9 @@ def form(desc):
     if desc.element_boost and desc.masked_training:   # Element boost: stills, with or without masks (a mask trims it)
         params += [
             _row("FACE_BOOST", "On", "check",
-                 "Early in the run, one part of each picture (the face and hair, unless you pick another below) "
-                 "counts much more than the rest, so it's learned faster - for a face, most of all when faces "
-                 "are small in the frame (medium and full-length shots). "
-                 "It runs 3 boosted stretches, then 1 normal, for the first 12 epochs or 600 steps, whichever "
-                 "is sooner; after that the run trains as normal, so the body and background catch up. Works "
-                 "with or without masks (a mask, if a picture has one, trims it). Pictures where it isn't found "
-                 "train as normal."),
+                 "Early in the run, the face (or the part you pick below) counts for much more than the rest of "
+                 "the picture, so it's learned faster. For sets of medium and full-length shots, where the face is "
+                 "small in the frame. Needs Target Megapixels 0.75 or more."),
             _row("FACE_BOOST_AREA", "What it boosts", "choice",
                  "Face and hair (the default): the face and the hair around it. Face only: just the face, for when "
                  "the hair changes from picture to picture or shouldn't be learned. These two use the face "
@@ -1074,6 +1071,10 @@ def state(desc, values, image_folder="", captioner="", speed_file=False, checkpo
             actions["TRAIN_SUBFOLDERS"] = act
     if not values.get("FACE_BOOST"):
         hidden.add("FACE_BOOST_AREA")
+    if desc.element_boost and launch.boost_too_small(desc, values):    # too few pixels in a small face: greyed, kept
+        disabled.add("FACE_BOOST")
+        hidden.add("FACE_BOOST_AREA")
+        notes["FACE_BOOST"] = launch.BOOST_TOO_SMALL.format(mp=launch.BOOST_MIN_MP)
     if desc.masked_training:
         prompt_slider = kind == "slider" and launch.slider_on(desc, {"FAMILY_SLIDER": True, "FAMILY_SLIDER_SOURCE": (
             "prompts" if values.get("FAMILY_SLIDER_SOURCE") == "Prompts" else "pairs")}, "prompts")
